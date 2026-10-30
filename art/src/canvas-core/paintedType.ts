@@ -62,11 +62,12 @@ export const paintedSticker = (g: Gfx, o: StickerSpec) => {
   paintGlyphs(g, F, { color: () => o.body, seed: o.seed + 2, off: [dp * 0.4, dp * 0.55], grow: o.size * 0.04, impasto: 0.1, dry: 0.15 });
   paintGlyphs(g, F, { color: () => o.outline, seed: o.seed + 3, grow: o.size * 0.045, impasto: 0.12, dry: 0.12 });
   paintGlyphs(g, F, { color: (_x, _y, t) => ramp(o.face, 1 - t * 0.9), seed: o.seed + 4, impasto: 0.28, dry: 0.2 });
-  paintGlyphs(g, F, { color: () => o.rim, seed: o.seed + 5, widthK: 0.45, lenK: 2.2, impasto: 0.6, dry: 0.3, only: (d, gx, gy, T) => d < T * 0.6 && gx * 0.45 + gy * 0.9 > 0.55 });
+  paintGlyphs(g, F, { color: () => o.rim, seed: o.seed + 5, widthK: 0.4, lenK: 3.2, step: F.T * 1.1, impasto: 0.5, dry: 0.45, alpha: 0.85, only: (d, gx, gy, T) => d > T * 0.18 && d < T * 0.42 && gx * 0.45 + gy * 0.9 > 0.72 });
 };
 // the lyric lines: one colour per phrase, a small round brush, a soft dark beneath
 export const paintedLine = (g: Gfx, text: string, x: number, y: number, size: number, color: string, seed: number, align: CanvasTextAlign = "center", tilt = 0) => {
   const F = glyphField(g.env, text, "KalamB", size, x, y, align, tilt);
-  paintGlyphs(g, F, { color: () => "#5a1a3a", seed, off: [2.5, 3.5], alpha: 0.28, impasto: 0, dry: 0.4, grow: 1 });
-  paintGlyphs(g, F, { color: (_x, _y, t) => mix(color, "#ffffff", 0.12 * (1 - t)), seed: seed + 1, impasto: 0.22, dry: 0.22, widthK: 1.1 });
+  // small letters want a finer brush: thinner, longer strokes, closer together, so the counters stay open
+  paintGlyphs(g, F, { color: () => "#5a1a3a", seed, off: [2, 3], alpha: 0.22, impasto: 0, dry: 0.4, widthK: 0.8, lenK: 1.4, step: Math.max(1.4, F.T * 0.34) });
+  paintGlyphs(g, F, { color: (_x, _y, t) => mix(color, "#ffffff", 0.12 * (1 - t)), seed: seed + 1, impasto: 0.2, dry: 0.12, widthK: 0.85, lenK: 1.35, step: Math.max(1.3, F.T * 0.3) });
 };

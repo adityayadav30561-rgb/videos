@@ -1,6 +1,6 @@
 import { Gfx, type Ctx, type Env, type P } from "./core";
 import type { Film } from "./film";
-import { clamp, inside, mix } from "./gallery";
+import { clamp, inside, mix, smooth } from "./gallery";
 import { weave, type OStroke } from "./paintedOilKit";
 import { paintedSticker, paintedLine } from "./paintedType";
 import {
@@ -74,16 +74,24 @@ const step = (f: number, f0: number, vals: number[]) => vals[clamp(f - f0, 0, va
 // pictures stay in front; outside the edge, gold dots stitched round the card on the indigo
 const inset = (k: number): P[] => CARD.map(([x, y]) => [CX + (x - CX) * k, H / 2 + (y - H / 2) * k] as P);
 const pathStrokes = (pts: P[], w: number, col: string, seed: number, o: Partial<OStroke> = {}) => { const out = []; for (let i = 0; i < pts.length; i += 60) out.push(st(pts.slice(i, Math.min(pts.length, i + 64)).filter((_, j) => j % 6 === 0).concat([pts[Math.min(pts.length - 1, i + 63)]]), w, col, seed + i, { impasto: 0.25, dry: 0.12, load: 1.15, jit: 0.03, soft: 0.1, ...o })); return out; };
-const paisley = (cx: number, cy: number, sz: number, a: number): P[] => { const pts: P[] = []; for (let i = 0; i < 60; i++) { const t = (i / 60) * Math.PI * 2, r = sz * (0.55 + 0.45 * Math.cos(t / 2) ** 2), x = Math.cos(t) * r * 0.62, y = Math.sin(t) * r + sz * 0.18 * Math.sin(t) ** 3; pts.push([x, y]); } const tip: P[] = [[-sz * 0.05, -sz * 1.1], [sz * 0.35, -sz * 1.45], [sz * 0.55, -sz * 1.2]]; return [...pts.slice(0, 44), ...tip, ...pts.slice(44)].map(([x, y]) => [cx + x * Math.cos(a) - y * Math.sin(a), cy + x * Math.sin(a) + y * Math.cos(a)] as P); };
+// a paisley (keri): a round bulb; from its upper left the outer edge sweeps up and over into a tip
+// that hooks to the right, and the inner edge runs back down from the tip into the bulb's upper right
+const paisley = (cx: number, cy: number, sz: number, a: number): P[] => {
+  const arc: P[] = Array.from({ length: 26 }, (_, i) => { const t = (-40 + (260 * i) / 25) * (Math.PI / 180); return [Math.cos(t) * sz, Math.sin(t) * sz] as P; });
+  const bez = (p0: P, c: P, p1: P, n: number): P[] => Array.from({ length: n }, (_, i) => { const t = (i + 1) / n, u = 1 - t; return [u * u * p0[0] + 2 * u * t * c[0] + t * t * p1[0], u * u * p0[1] + 2 * u * t * c[1] + t * t * p1[1]] as P; });
+  const tip: P = [sz * 0.95, -sz * 1.75], outer = bez(arc[arc.length - 1], [-sz * 0.85, -sz * 1.85], tip, 14), inner = bez(tip, [sz * 0.25, -sz * 1.05], arc[0], 12);
+  return [...arc, ...outer, ...inner.slice(0, -1)].map(([x, y]) => [cx + x * Math.cos(a) - y * Math.sin(a), cy + x * Math.sin(a) + y * Math.cos(a)] as P);
+};
 const ORNAMENT = (g: Gfx) => {
   const PLUM = "#6a1e3c", GOLDP = "#d8a23a", CREAM = "#fbe6c8", MC: P = [CX, H / 2];
   lay(g, [...pathStrokes([...inset(0.958), inset(0.958)[0]], 4, PLUM, 2000), ...pathStrokes([...inset(0.918), inset(0.918)[0]], 3, GOLDP, 2200)]);
   const dots = inset(0.938); lay(g, dots.filter((_, i) => i % 13 === 0).map(([x, y], i) => st([[x - 2, y], [x + 2, y + 1]], 8, i % 4 === 0 ? PLUM : GOLDP, 2400 + i, { impasto: 0.6, dry: 0, load: 1.3, soft: 0 })));
   // the corner paisleys, each pointing in toward the middle, with a ring of dots and a five-petal flower
   ([[170, 250, 0.7], [W - 170, 250, -0.7 + Math.PI], [170, H - 250, -0.7], [W - 170, H - 250, 0.7 + Math.PI]] as [number, number, number][]).forEach(([x, y, a], i) => {
-    const pz = paisley(x, y, 62, a + Math.PI / 2), inner = paisley(x, y, 34, a + Math.PI / 2);
+    const pz = paisley(x, y, 50, a + Math.PI / 2), inner = paisley(x + Math.cos(a) * 8, y + Math.sin(a) * 8, 26, a + Math.PI / 2);
     paintForm(g, pz, objCol(["#3a0a20", "#5a1430", "#7e2444", "#a23a5a", "#c8607a", "#eaa0b0"], pillowN(pz, 18), 1.1), 9, along(a), 2600 + i * 10, true); contour(g, pz, "#2a0614", 3, 2605 + i * 10);
     paintForm(g, inner, objCol(["#6a4004", "#a8700e", "#d49c1e", "#efc443", "#fde69a"], pillowN(inner, 10), 1.1), 6, along(a), 2607 + i * 10, true);
+    lay(g, Array.from({ length: 9 }, (_, k) => { const b = a + Math.PI / 2 + (k / 8 - 0.5) * Math.PI * 1.1 + Math.PI / 2, r0 = 60, r1 = 78; return st([[x + Math.cos(b) * r0, y + Math.sin(b) * r0], [x + Math.cos(b) * r1, y + Math.sin(b) * r1]], 4, "#7e2444", 2615 + i * 12 + k, { c1: "#d8a23a", impasto: 0.4, dry: 0.2 }); }));
     lay(g, ellipse(x, y, 92, 92, 14).map(([px, py], k) => st([[px - 1.5, py], [px + 1.5, py + 1]], 7, k % 2 ? GOLDP : CREAM, 2620 + i * 20 + k, { impasto: 0.6, dry: 0, load: 1.3, soft: 0 })));
     const fx = x + Math.cos(a) * 120, fy = y + Math.sin(a) * 120; lay(g, Array.from({ length: 5 }, (_, k) => { const b = (k / 5) * Math.PI * 2; return st([[fx, fy], [fx + Math.cos(b) * 16, fy + Math.sin(b) * 16]], 10, "#c8607a", 2640 + i * 10 + k, { c1: CREAM, impasto: 0.5, dry: 0.2 }); }).concat([st([[fx - 2, fy], [fx + 2, fy]], 8, GOLDP, 2650 + i, { impasto: 0.8, soft: 0 })]));
   });
