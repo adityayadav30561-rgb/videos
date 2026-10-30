@@ -7,16 +7,10 @@ import { Camera, camera, project } from "./character/math3";
 import { letter } from "./drafting";
 import { boy, BOY_VERSION } from "./characters/boy";
 import { BOY_DIMS, floorSit, standing, tumbler, withProps } from "./characters/boy/poses";
-import { renderGouache, type GPalette } from "./character/render/gouache";
+import { renderGouache } from "./character/render/gouache";
+import { BOY_GOUACHE } from "./characters/boy/palette";
 
 const W = 2880, H = 2200, BOARD = "#efe2c2", MUTED = "#8a7a62", INK = "#1d1a2a";
-export const BOY_GOUACHE: GPalette = {
-  skin: { base: "#d69a72", shade: "#a96e51" }, sweater: { base: "#d49a3a", shade: "#9d6a25" }, trousers: { base: "#323a68", shade: "#1f2546" },
-  sock: { base: "#efe3c6", shade: "#c4b48f" }, hair: { base: "#2a222e", shade: "#16111a" }, hairLine: { base: "#3d3446", shade: "#2a222e" },
-  pupil: { base: "#2b1d18", shade: "#1a110e" }, white: { base: "#f4ead8", shade: "#ddd0b8" }, blush: { base: "#d98878", shade: "#b86a5c" },
-  mouth: { base: "#6e3434", shade: "#4d2222" }, lip: { base: "#b46a5e", shade: "#8f4f45" }, nail: { base: "#e8c0a6", shade: "#cfa085" },
-  glass: { base: "#c7dbe2", shade: "#9fb9c4", alpha: 0.6 }, amber: { base: "#c98031", shade: "#9a5d20" },
-};
 const label = (g: Gfx, t: string, x: number, y: number, cap = 24, color = INK) => letter(g, t, x, y, { cap, color, seed: t.length * 7 + Math.round(x), w: cap / 11, opacity: 0.9 });
 // a long lens from far off: near-orthographic, so the grid reads true
 const fullCam = (cx: number, floorY: number, figPx: number, yawCam = 0, height = 1.76, elev = 0): Camera => { const d = 14, f = (figPx * d) / height, a = (yawCam * Math.PI) / 180; return camera([Math.sin(a) * d, height * 0.52 + elev, Math.cos(a) * d], [0, height * 0.52, 0], f, cx, floorY - figPx * 0.52); };

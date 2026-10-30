@@ -1,7 +1,13 @@
 import { rng, type Ctx, type Env, type P } from "./core";
 import type { Film } from "./film";
 import { mix } from "./gallery";
-import { easel, ell, inside, limb, place, paint, sm, lerp, type Painting } from "./paaroGouache";
+import { BRUSH, easel, ell, inside, place, paint, sm, lerp, type Painting } from "./paaroGouache";
+import { Gfx } from "./core";
+import { camera, type Camera } from "./character/math3";
+import { boy } from "./characters/boy";
+import { floorSit, tumbler, withProps } from "./characters/boy/poses";
+import { BOY_GOUACHE } from "./characters/boy/palette";
+import { renderGouache } from "./character/render/gouache";
 import { registerFaces } from "./launchLook";
 import lora from "../../assets/fonts/Lora-Bold.ttf";
 
@@ -39,78 +45,25 @@ export const C = {
 };
 
 // ---------------------------------------------------------------- the boy
-// pose: sip 0..1 lifts the glass to his lips; bow -1..1 tips the head; slump 0..1 sinks him into himself
-export type BoyPose = { sip: number; bow: number; slump: number; tilt: number; glass: boolean; fill: number };
-export const REST: BoyPose = { sip: 0, bow: 0, slump: 0, tilt: 0, glass: true, fill: 0.35 };
-
-export const boyPainting = (pose: BoyPose): Painting => {
-  const e = easel(), { S, D, L } = e, sl = pose.slump, sip = pose.sip;
-  const hip: P = [770, 930], neck: P = [lerp(742, 752, sl), lerp(702, 716, sl)];
-  // far leg first (in his own shadow), then the torso, then the near leg over it
-  const farThigh = limb([[748, 924], [812, 862], [866, 800]], [30, 27, 23]), farShin = limb([[866, 800], [884, 866], [898, 926]], [22, 18, 14]);
-  S(farThigh.poly, C.trousersD); S(farShin.poly, C.trousersD);
-  S(sm([[884, 918], [940, 922], [950, 940], [886, 944]]), C.creamD);
-  // torso: crew-neck sweater, leaning back on the rail
-  const torso: P[] = sm([[702, 938], [686, 842], [690, 770], [706, 728], [730, 708], [neck[0] + 10, neck[1] - 4], [neck[0] + 46, neck[1] + 4], [808, 732], [826, 790], [842, 870], [846, 936]]);
-  S(torso, C.sweater, { shade: C.sweaterD, sd: [24, -8], ang: 1.4 });
-  D([[712, 800], [716, 900]], 18, C.sweaterD, { alpha: 0.55 }); D([[800, 760], [826, 850]], 12, mix(C.sweater, C.lampGlow, 0.5), { alpha: 0.6 });
-  // ribbed hem and the collar
-  S(sm([[702, 930], [846, 930], [848, 944], [700, 944]], true, 2), C.sweaterD);
-  // near leg, knee up
-  const thigh = limb([[786, 924], [850, 852], [912, 786]], [36, 32, 27]), shin = limb([[912, 786], [936, 858], [954, 924]], [26, 21, 16]);
-  S(thigh.poly, C.trousers, { shade: C.trousersD, sd: [14, -10], ang: -0.8 }); S(shin.poly, C.trousers, { shade: C.trousersD, sd: [12, -2], ang: 1.2 });
-  S(sm([[938, 912], [1004, 920], [1014, 940], [942, 946]]), C.cream, { shade: C.creamD, sd: [8, -2] });
-  // neck and head: three-quarter profile facing right, bowed
-  const bow = 0.24 + 0.1 * pose.bow + 0.12 * sl - 0.42 * sip, head: P = [neck[0] + 22 + 10 * sip, neck[1] - 66 + 6 * sl];
-  S(place([[-14, 0], [14, -2], [16, 40], [-16, 42]], [neck[0] + 20, neck[1] - 26], bow * 0.5), C.skin, { shade: C.skinD, sd: [10, 0] });
-  S(sm([[neck[0] - 4, neck[1] + 4], [neck[0] + 16, neck[1] - 8], [neck[0] + 44, neck[1] - 6], [neck[0] + 58, neck[1] + 8], [neck[0] + 30, neck[1] + 16]]), C.sweaterD);
-  const H = (pts: P[]) => place(pts, head, bow);
-  const face = sm(H([[-46, -8], [-36, -44], [0, -60], [36, -48], [50, -24], [52, -8], [60, 8], [66, 18], [55, 24], [57, 34], [51, 40], [48, 54], [30, 66], [2, 62], [-26, 40]]), true, 5);
-  S(face, C.skin, { shade: C.skinD, sd: [16, -4] });
-  S(ell(...H([[22, 24]])[0], 10, 6, bow), C.blush, { alpha: 0.4 });
-  S(sm(H([[18, 48], [46, 46], [44, 58], [28, 64], [10, 58]])), C.skinD, { alpha: 0.45, rag: 0.6 }); // a night's stubble along the jaw
-  S(sm(H([[-8, -2], [6, -8], [8, 10], [-4, 16]])), C.skin, { shade: C.skinD, sd: [5, 0] }); // ear
-  const hair = sm(H([[-52, 10], [-58, -18], [-52, -44], [-30, -66], [0, -76], [30, -70], [52, -56], [64, -38], [66, -20], [54, -24], [50, -10], [40, -24], [26, -16], [12, -28], [-2, -16], [-14, -8], [-12, 4], [-28, 16], [-42, 24]]), true, 4);
-  S(hair, C.hair, { shade: "#15111a", sd: [8, -2] });
-  D(H([[-30, -50], [30, -60]]), 10, C.hairL, { alpha: 0.6 });
-  L(H([[-40, -40], [-10, -62], [26, -60]]), 1.4); L(H([[-46, -6], [-30, -30], [-6, -46]]), 1.3); L(H([[40, -46], [58, -30], [66, -14]]), 1.4);
-  S(sm(H([[46, -30], [62, -22], [70, -4], [58, -14], [50, -18]])), C.hair); // a lock fallen forward
-  // the line: face contour with the nose, closed eye with lashes, sad brow, mouth, ear, the fringe
-  L(H([[52, -8], [60, 8], [66, 18], [55, 24], [57, 34], [51, 40], [48, 54], [30, 66]]), 2.2);
-  L(H([[22, 2], [30, 7], [40, 5]]), 2); L(H([[26, 6], [24, 12]]), 1.2); L(H([[33, 7], [33, 13]]), 1.2);
-  L(H([[18, -14], [30, -18], [42, -14]]), 2);
-  L(H([[44, 37], [52, 36]]), 1.6);
-  L(H([[-4, -4], [4, -6], [6, 8], [-2, 14]]), 1.5);
-  L(H([[60, -20], [48, -26], [44, -12]]), 1.6); L(H([[34, -30], [26, -18]]), 1.4);
-  // near arm: shoulder to elbow on the knee to a loose hand; sipping lifts the hand to the lips
-  const sh: P = [neck[0] + 30, neck[1] + 34], el: P = [lerp(884, 860, sip), lerp(778 + 6 * sl, 720, sip)], wr: P = [lerp(962, head[0] + 40, sip), lerp(772 + 8 * sl, head[1] + 44, sip)];
-  const upper = limb([sh, [(sh[0] + el[0]) / 2, (sh[1] + el[1]) / 2 + 6], el], [24, 22, 20]), fore = limb([el, [(el[0] + wr[0]) / 2, (el[1] + wr[1]) / 2 + 4], wr], [19, 17, 14]);
-  S(upper.poly, C.sweater, { shade: C.sweaterD, sd: [8, -10] }); S(fore.poly, C.sweater, { shade: C.sweaterD, sd: [4, -10] });
-  D([el, wr], 8, C.sweaterD, { alpha: 0.5 });
-  // the tumbler, hanging from three fingers (or at the lips, tipped)
-  const ang = Math.atan2(wr[1] - el[1], wr[0] - el[0]), tip = -1.15 * sip - 1.5 * pose.tilt;
-  const gO: P = [wr[0] + Math.cos(ang) * 30, wr[1] + Math.sin(ang) * 30 + 36 * (1 - sip)];
-  const glassPts = place([[-22, -30], [22, -30], [19, 28], [-19, 28]], gO, tip);
-  if (pose.glass) {
-    S(glassPts, C.glass, { alpha: 0.55 });
-    if (pose.fill > 0) S(place([[-19, 28 - 50 * pose.fill], [19, 28 - 50 * pose.fill], [19, 28], [-19, 28]], gO, tip * 0.4), C.amber, { alpha: 0.95 });
-    S(place([[-16, -24], [-11, -24], [-11, 20], [-16, 20]], gO, tip), C.cream, { alpha: 0.7 });
-    [0, 1, 2, 3].forEach((i) => L([glassPts[i], glassPts[(i + 1) % 4]], 1.6)); L(place([[-17, 18], [17, 18]], gO, tip), 1.2);
-  }
-  // the hand: back of the hand, knuckles, three fingers curled over the rim, thumb along the side
-  const F = (u: number, v: number): P => [wr[0] + Math.cos(ang) * u - Math.sin(ang) * v, wr[1] + Math.sin(ang) * u + Math.cos(ang) * v];
-  const hand = sm([F(-4, -15), F(26, -17), F(44, -6), F(52, 14), F(48, 30), F(36, 34), F(30, 20), F(18, 16), F(4, 14), F(-4, 12)], true, 4);
-  S(hand, C.skin, { shade: C.skinD, sd: [8, -6] });
-  L(sm([F(26, -17), F(44, -6), F(52, 14), F(48, 30), F(36, 34)], false, 4), 1.8);
-  L([F(36, 4), F(46, 12)], 1.3); L([F(30, 12), F(40, 22)], 1.3); L([F(4, 14), F(18, 16), F(30, 20)], 1.5);
-  // body line: back, collar, the near knee, sweater sleeve end
-  L(sm([[706, 728], [690, 770], [686, 842], [700, 936]], false), 2);
-  L(thigh.a.filter((_, i) => i % 2 === 0).slice(2), 1.8); L(shin.b.filter((_, i) => i % 2 === 0).slice(1), 1.8);
-  L([[904, 772], [914, 768], [922, 776]], 1.4);
-  L(upper.a.filter((_, i) => i % 2 === 0), 1.6); L(fore.a.filter((_, i) => i % 2 === 0), 1.6);
-  L(sm([[938, 912], [1004, 920], [1014, 940], [942, 946]], false), 1.5);
-  return e.p;
+// He is NOT drawn here: he is the character module (characters/boy), posed and painted by the gouache
+// hand. The room only says where he sits and what he is doing.
+export type BoyPose = { sip: number; slump: number; eyes: number; tilt: number; glass: boolean; fill: number };
+export const REST: BoyPose = { sip: 0, slump: 0, eyes: 0.75, tilt: 0, glass: true, fill: 0.3 };
+// his place in the room: hips on the floor just in front of the bed rail, facing the lamp
+export const BOY_AT = { x: 735, floor: 950, pxPerM: 540, yaw: 62, elev: 0.9 };
+export const boyCam = (): Camera => { const h = 1.76, d = 14, f = BOY_AT.pxPerM * d; return camera([0, h * 0.52 + BOY_AT.elev, d], [0, h * 0.52, 0], f, BOY_AT.x, BOY_AT.floor - BOY_AT.pxPerM * h * 0.52); };
+export const paintBoy = (ctx: Ctx, env: Env, pose: BoyPose) => {
+  const cam = boyCam(), p = floorSit(BOY_AT.yaw, { sip: pose.sip, slump: pose.slump, eyes: pose.eyes });
+  const s = withProps(boy.toScene(p, cam), cam, pose.glass ? tumbler(p, pose.fill, pose.sip * 1.1 + pose.tilt * 1.9) : []);
+  // the Gfx carries the current camera (zoom/pan of the shot) as its own transform
+  const m = ctx.getTransform(), k = env.scale, g = new Gfx(ctx, env, 0, BRUSH);
+  g.push(m.e / k, m.f / k, m.a / k);
+  // his shadow on the floorboards, thrown left, away from the lamp: a flat of darker floor
+  if (s.ground?.shadow.length) { ctx.save(); g.touch(0, 0, 1920, 1080); g.cur.globalAlpha = 0.55; g.cur.fillStyle = "#141a33"; g.cur.beginPath(); s.ground.shadow.forEach(([x, y], i) => (i ? g.cur.lineTo(x - 30, y + 4) : g.cur.moveTo(x - 30, y + 4))); g.cur.closePath(); g.cur.fill(); ctx.restore(); }
+  renderGouache(g, s, BOY_GOUACHE, { light: LAMP_LIGHT });
+  g.pop(); ctx.setTransform(m);
 };
+const LAMP_LIGHT: P = [0.82, -0.57]; // toward the lamp: right of him and above
 
 // ---------------------------------------------------------------- the room
 export type RoomState = { t: number; rain: number; moon: number; bottle: number; boy: BoyPose; pillowKept: boolean };
@@ -260,6 +213,6 @@ export const drawRoomShot = (ctx: Ctx, env: Env, st: RoomState, z = 1, f: P = [W
   ctx.save(); trace(ctx, STAGE); ctx.clip();
   const k = env.scale; ctx.setTransform(k * z, 0, 0, k * z, k * (W / 2 - f[0] * z), k * (H / 2 - f[1] * z));
   paint(ctx, env, roomPainting(st), C.ink);
-  paint(ctx, env, boyPainting(st.boy), C.ink);
+  paintBoy(ctx, env, st.boy);
   ctx.restore();
 };
