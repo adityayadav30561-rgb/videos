@@ -1,7 +1,8 @@
 import { Gfx, type Ctx, type Env, type P } from "./core";
 import type { Film } from "./film";
-import { clamp, inside } from "./gallery";
-import { weave } from "./paintedOilKit";
+import { clamp, inside, mix } from "./gallery";
+import { fill, weave } from "./paintedOilKit";
+import { photoFields, sampler, orient } from "./fromPhoto";
 import {
   W, H, CX, OIL_M, LILY_C, GOLD, CRIMSON, TURQ, ROSE, INDIGO, BULLA, NAINA, ramp, rng, st, lay, stage, glossyWord, handLine, sparkle, paintForm,
   contour, objCol, pillowN, sphereN, tangentDir, along, rot, ellipse, thin, edgeDist, woundPoly, paintWound, paintEye, lilyPetals, paintLily,
@@ -39,7 +40,7 @@ const N = 229; // the song: 19.18 s at 12 fps
 
 // ---------------------------------------------------------------- sprites: a picture painted once, laid down many times
 const SPRITES_KEPT = 8;
-type M = { px?: number; py?: number; sx?: number; sy?: number; rot?: number; skew?: number; dx?: number; dy?: number; alpha?: number; clip?: [number, number, number, number] };
+type M = { px?: number; py?: number; sx?: number; sy?: number; rot?: number; skew?: number; dx?: number; dy?: number; alpha?: number; clip?: [number, number, number, number]; circle?: [number, number, number] };
 const sprite = (g: Gfx, key: string, paint: (lg: Gfx) => void, m: M = {}) => {
   const e = g.env, DW = Math.round(e.W * e.scale), DH = Math.round(e.H * e.scale), k = `naina:sprite:${key}:${DW}x${DH}`;
   let L = e.cache.get(k) as { canvas: unknown; ctx: CanvasRenderingContext2D } | undefined;
@@ -55,6 +56,7 @@ const sprite = (g: Gfx, key: string, paint: (lg: Gfx) => void, m: M = {}) => {
   const c = g.cur, px = m.px ?? CX, py = m.py ?? H / 2; c.save(); c.setTransform(e.scale, 0, 0, e.scale, 0, 0); c.globalAlpha = m.alpha ?? 1;
   c.translate(px + (m.dx ?? 0), py + (m.dy ?? 0)); c.rotate(m.rot ?? 0); c.transform(1, 0, m.skew ?? 0, 1, 0, 0); c.scale(m.sx ?? 1, m.sy ?? 1); c.translate(-px, -py);
   if (m.clip) { c.beginPath(); c.rect(m.clip[0], m.clip[1], m.clip[2] - m.clip[0], m.clip[3] - m.clip[1]); c.clip(); }
+  if (m.circle) { c.beginPath(); c.arc(m.circle[0], m.circle[1], m.circle[2], 0, Math.PI * 2); c.clip(); }
   c.drawImage(L.canvas as CanvasImageSource, 0, 0, W, H); c.restore();
 };
 // the pop: in squashed small, stretched up past full, squashed down, a little over, settled (one drawing a frame)
@@ -64,6 +66,58 @@ const PULSE: [number, number][] = [[1.1, 1.14], [1.06, 0.92], [0.99, 1.03], [1, 
 // boil on twos: a held picture redrawn by hand every other frame never sits in exactly the same place
 const boil = (f: number, s: number) => { const r = rng(s * 97 + Math.floor(f / 2) * 13); return { dx: (r() - 0.5) * 3.2, dy: (r() - 0.5) * 3.2, rot: (r() - 0.5) * 0.012 }; };
 const step = (f: number, f0: number, vals: number[]) => vals[clamp(f - f0, 0, vals.length - 1)];
+
+// ---------------------------------------------------------------- the eye, painted from the person's photograph
+// The person's own photo of a pair of eyes steers every eye in the film (fromPhoto: it is read for its
+// colour and for the direction its texture runs; no photo pixel is ever drawn). Each eye is the shape
+// traced from the photo: the upper lid's arc, the lower lid, the iris. Inside the lids the colour of
+// every stroke is the photo's colour there, pushed a little toward the film's warm palette; the lashes
+// are strokes laid only where the photo is dark above the lid, each one along the strand's own direction.
+type PEye = { up: P[]; lo: P[]; iris: P; ir: number; mid: P };
+const PE = (up: P[], lo: P[], iris: P, ir: number): PEye => ({ up, lo, iris, ir, mid: [(up[0][0] + up[up.length - 1][0]) / 2, (up[0][1] + up[up.length - 1][1]) / 2] });
+// traced on a 20 px grid over the photo (1280 x 720): the right-hand eye (more open) and the left
+const RIGHT = PE([[620, 470], [650, 440], [700, 401], [730, 389], [780, 381], [830, 383], [880, 393], [910, 413], [927, 442]], [[927, 442], [905, 458], [880, 465], [805, 472], [730, 467], [655, 465], [620, 470]], [840, 425], 58);
+const LEFT = PE([[45, 462], [70, 440], [100, 428], [150, 418], [200, 416], [250, 425], [280, 442], [300, 478]], [[300, 478], [280, 488], [250, 492], [175, 497], [100, 494], [60, 478], [45, 462]], [245, 458], 58);
+type Place = { c: P; s: number }; // where the eye's corner-to-corner middle lands in the film, and its scale
+const toFilm = (E: PEye, T: Place) => (p: P): P => [T.c[0] + (p[0] - E.mid[0]) * T.s, T.c[1] + (p[1] - E.mid[1]) * T.s];
+const toPhoto = (E: PEye, T: Place) => (x: number, y: number): P => [E.mid[0] + (x - T.c[0]) / T.s, E.mid[1] + (y - T.c[1]) / T.s];
+const smoothLid = (pts: P[]) => thin(pts, pts.length);
+const hex = (r: number, g: number, b: number) => "#" + [r, g, b].map((v) => Math.round(clamp(v) * 255).toString(16).padStart(2, "0")).join("");
+let PH: ReturnType<typeof sampler> | null = null;
+const photo = (env: Env) => (PH ??= sampler(photoFields(env, "eye", { tensorR: 3 }), 1));
+type EyeMode = "base" | "noIris" | "lashes";
+const photoEye = (g: Gfx, E: PEye, T: Place, mode: EyeMode, seed: number) => {
+  const S = photo(g.env), F = toFilm(E, T), Pp = toPhoto(E, T), s = T.s, almond = [...E.up, ...E.lo.slice(1)].map(F);
+  const colorAt = (x: number, y: number) => {
+    const [px, py] = Pp(x, y);
+    if (mode === "noIris" && Math.hypot(px - E.iris[0], py - E.iris[1]) < E.ir * 1.08) { const t = clamp((py - (E.iris[1] - E.ir)) / (2 * E.ir)); return mix("#f1e7e6", "#b9a6a8", 0.25 + 0.5 * t); }
+    const [r, gg, b] = S.rgb(px, py), l = 0.2126 * r + 0.7152 * gg + 0.0722 * b, k = 1.12; // a touch more contrast and warmth, as a painter keys it
+    return mix(hex(l + (r - l) * k + 0.02, l + (gg - l) * k, l + (b - l) * k - 0.01), "#2a1214", l < 0.2 ? 0.25 : 0);
+  };
+  const dir = (x: number, y: number) => { const [px, py] = Pp(x, y), [dx, dy] = orient(S.flow(px, py), [1, 0], 0.7); return Math.atan2(dy, dx); };
+  const w = Math.max(4.5, 6.5 * s), bb = almond.reduce((a, [x, y]) => [Math.min(a[0], x), Math.min(a[1], y), Math.max(a[2], x), Math.max(a[3], y)], [1e9, 1e9, -1e9, -1e9]);
+  const box = (pad: number): P[] => [[bb[0] - pad, bb[1] - pad], [bb[2] + pad, bb[1] - pad], [bb[2] + pad, bb[3] + pad], [bb[0] - pad, bb[3] + pad]];
+  if (mode !== "lashes") {
+    // a solid lay-in of the white's own tone, then the eye in short strokes of the photo's colour
+    { const c = g.cur; g.touch(bb[0], bb[1], bb[2], bb[3]); c.save(); c.fillStyle = "#d9cfcf"; c.beginPath(); almond.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.closePath(); c.fill(); c.restore(); }
+    lay(g, fill({ region: box(w), step: w * 0.5, len: w * 2.2, w: w * 1.15, dir, seed, load: 1.15, dry: 0.12, impasto: 0.1, jit: 0.02, soft: 0.25, color: (x, y) => (inside(almond, x, y) ? colorAt(x, y) : null), sweep: 3.14 }), [almond]);
+    lay(g, fill({ region: box(w), step: w * 0.42, len: w * 1.6, w: w * 0.8, dir, seed: seed + 1, load: 1.1, dry: 0.2, impasto: 0.22, jit: 0.02, soft: 0.25, color: (x, y) => (inside(almond, x, y) ? colorAt(x, y) : null), sweep: 3.14 }), [almond]);
+    // the lid's shadow along the top of the eyeball, and the waterline below
+    lay(g, [st(E.up.map(F).map(([x, y]) => [x, y + 7 * s] as P), 10 * s, "#5a3a3c", seed + 2, { alpha: 0.5, impasto: 0, dry: 0.4 })], [almond]);
+    if (mode === "base") { const ic = F(E.iris); lay(g, [st([[ic[0] - E.ir * s * 0.55, ic[1] - E.ir * s * 0.42], [ic[0] - E.ir * s * 0.38, ic[1] - E.ir * s * 0.5], [ic[0] - E.ir * s * 0.18, ic[1] - E.ir * s * 0.52]], Math.max(4, 5 * s), "#fffaf2", seed + 3, { impasto: 1, load: 1.4, dry: 0.05, soft: 0 })]); }
+    return;
+  }
+  // the lid lines: the upper lid a dark crease of lash roots, the lower lid soft
+  lay(g, [st(smoothLid(E.up).map(F), Math.max(3.5, 4.5 * s), "#140a0a", seed + 4, { impasto: 0.25, dry: 0.05, load: 1.25 }), st(smoothLid(E.lo).slice(1, -1).map(F), Math.max(1.6, 2.2 * s), "#5a3a36", seed + 5, { impasto: 0.12, dry: 0.3 })]);
+  // the lashes: only where the photo is dark in a band above the upper lid (and a thinner one below
+  // the lower), every stroke along the strand
+  const band = (lid: P[], d: number): P[] => [...lid.map(F), ...lid.map(([x, y]) => F([x, y + d])).reverse()];
+  const lashes = (poly: P[], dark: number, wl: number, col: string, sd: number) => lay(g, fill({ region: poly, step: Math.max(2.5, 3 * s), len: 22 * s, w: wl, dir: (x, y) => { const [px, py] = Pp(x, y), [dx, dy] = orient(S.flow(px, py), [0.25, -1], 0.9); return Math.atan2(dy, dx); }, seed: sd, load: 1.2, dry: 0.15, impasto: 0.2, jit: 0.02, soft: 0.1, bend: 0.3, color: (x, y) => { if (!inside(poly, x, y)) return null; const [px, py] = Pp(x, y); return S.lum(px, py) < dark ? col : null; }, sweep: 0 }));
+  lashes(band(E.up, -62), 0.24, Math.max(1.6, 2.4 * s), "#0c0606", seed + 6);
+  lashes(band(E.lo, 26), 0.3, Math.max(1.1, 1.5 * s), "#2a1a18", seed + 7);
+};
+// one eye whole: its white and iris, then its lashes; or with the world for an iris (painted live, turning)
+const EYE_PARTS = (E: PEye, T: Place, mode: "base" | "noIris", seed: number) => (lg: Gfx) => { photoEye(lg, E, T, mode, seed); photoEye(lg, E, T, "lashes", seed + 20); };
 
 // ---------------------------------------------------------------- the pictures
 const STAGE = (lg: Gfx) => stage(lg, 1);
@@ -76,22 +130,35 @@ const PLASTER_S = (lg: Gfx) => {
   const r = rng(331); for (let i = 0; i < 26; i++) { const sx = i < 13 ? -1 : 1, x = CX + sx * (180 + r() * 120), y = PLASTER_AT[1] + (r() - 0.5) * 160, [px, py] = rot([[x, y]], CX, PLASTER_AT[1], -0.3)[0]; if (inside(PLASTER_POLY, px, py) && edgeDist(PLASTER_POLY, px, py) > 16) lay(lg, [st([[px, py], [px + 2, py + 1]], 9, "#a87e54", 340 + i, { impasto: 0.15, dry: 0.1 })]); }
 };
 const EYE_A: P = [CX, PLASTER_AT[1] - 8], EYE_UP = 640 - EYE_A[1]; // the eye in the band-aid, and how far it rises over the lily
+const EYE_A_T: Place = { c: EYE_A, s: 300 / 307 };
+const EYE_A_S = EYE_PARTS(RIGHT, EYE_A_T, "base", 360);
 // the lily's outline as ONE closed line (the envelope of its six tepals), so the wound's line can curl into it
 const LILY_LOOP: P[] = (() => { const { pets } = lilyPetals(), out: P[] = []; for (let i = 0; i < 120; i++) { const a = 2.62 + (i / 119) * Math.PI * 2; let r = 440; while (r > 10 && !pets.some((p) => inside(p, LILY_C[0] + Math.cos(a) * r, LILY_C[1] + Math.sin(a) * r))) r -= 3; out.push([LILY_C[0] + Math.cos(a) * r, LILY_C[1] + Math.sin(a) * r]); } return out; })();
 const morphLine = (g: Gfx, A: P[], B: P[], t: number, w: number, seed: number) => { const pts = A.map((p, i) => [p[0] + (B[i][0] - p[0]) * t, p[1] + (B[i][1] - p[1]) * t] as P); lay(g, [st(thin(pts, 44), w, "#6a0812", seed, { c1: "#3a0408", impasto: 0.3, dry: 0.04, load: 1.3, jit: 0.02 })]); };
-const DROP_ON: P = [LILY_C[0] + 190, LILY_C[1] + 120], GLOBE_C: P = [CX, 1010], GLOBE_R = 200;
+const DROP_R = 52, DROP_ON: P = [LILY_C[0] + 175, LILY_C[1] + 110], GLOBE_C: P = [CX, 1010], GLOBE_R = 200;
 // light on a normal, from the upper left (the frames' one light)
 const litN = (n: [number, number, number]) => Math.max(0, (-0.55 * n[0] - 0.7 * n[1] + 0.55 * n[2]) / 1.046);
 const DISC = (lg: Gfx) => { const p = ellipse(GLOBE_C[0], GLOBE_C[1], GLOBE_R, GLOBE_R, 60), n = sphereN(GLOBE_C[0], GLOBE_C[1], GLOBE_R); paintForm(lg, p, (x, y) => ramp(INDIGO, 0.12 + 0.55 * litN(n(x, y))), 12, tangentDir(GLOBE_C[0], GLOBE_C[1]), 860, true); contour(lg, p, "#05061a", 5, 865); };
-const EYE_W = 900, EYE_HH = (EYE_W / 2) * 0.42;
-const lidPts = (lower: boolean): P[] => Array.from({ length: 120 }, (_, i) => { const t = i / 119, x = GLOBE_C[0] - EYE_W / 2 + EYE_W * t, s = Math.sin(Math.PI * t); return [x, lower ? GLOBE_C[1] + EYE_HH * 0.75 * Math.pow(s, 1.1) : GLOBE_C[1] - EYE_HH * Math.pow(s, 0.8) * (1 + 0.15 * (t - 0.5))] as P; });
-const UPPER = lidPts(false), LOWER = lidPts(true);
-const GLOBE_EYE = (lg: Gfx) => paintEye(lg, GLOBE_C[0], GLOBE_C[1], EYE_W, 1, (g, cx, cy, r) => globeIris(g, cx, cy, r, 4), 500);
+// the eye round the world: the photo's right eye at 2.95x, placed so its iris is the globe
+const GE_S = 2.95, GE_T: Place = { c: [GLOBE_C[0] - (RIGHT.iris[0] - RIGHT.mid[0]) * GE_S, GLOBE_C[1] - (RIGHT.iris[1] - RIGHT.mid[1]) * GE_S], s: GE_S };
+const GE_F = toFilm(RIGHT, GE_T), IRIS_GR = RIGHT.ir * GE_S, GE_MID = GE_T.c;
+const resampleTo = (pts: P[], n: number): P[] => { const L: number[] = [0]; for (let i = 1; i < pts.length; i++) L.push(L[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1])); const T = L[L.length - 1]; return Array.from({ length: n }, (_, k) => { const d = (k / (n - 1)) * T; let i = 1; while (i < L.length - 1 && L[i] < d) i++; const f = (d - L[i - 1]) / (L[i] - L[i - 1] || 1); return [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * f, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * f] as P; }); };
+const UPPER = resampleTo(RIGHT.up.map(GE_F), 120), LOWER = resampleTo([...RIGHT.lo].reverse().map(GE_F), 120);
+const GE_ALMOND = [...RIGHT.up, ...RIGHT.lo.slice(1)].map(GE_F);
+const GE_BASE = (lg: Gfx) => photoEye(lg, RIGHT, GE_T, "base", 500), GE_LASH = (lg: Gfx) => photoEye(lg, RIGHT, GE_T, "lashes", 520);
+// the world turns only while it sits still: from when its land starts landing until the blink ends
+const spinAt = (f: number) => (f < 98 ? 0 : (f - 98) * 0.12);
+const liveGlobe = (g: Gfx, f: number, r: number, lands: number, sy = 1, clipEye = false) => {
+  const c = g.cur, e = g.env; c.save(); c.setTransform(e.scale, 0, 0, e.scale, 0, 0); c.translate(GLOBE_C[0], GE_MID[1]); c.scale(1, sy); c.translate(-GLOBE_C[0], -GE_MID[1]);
+  if (clipEye) { c.beginPath(); GE_ALMOND.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.closePath(); c.clip(); }
+  globeIris(g, GLOBE_C[0], GLOBE_C[1], r, lands, spinAt(f)); c.restore();
+};
 const HEART_C: P = [CX, 1000], HEART_S = 21;
 const heartLine = (frac: number): P[] => Array.from({ length: 120 }, (_, i) => heartPt(Math.PI - Math.PI * 2 * frac * (i / 119), HEART_C[0], HEART_C[1], HEART_S));
-const EYES: [P, P] = [[330, 1000], [750, 1000]], EYES_W = 360;
-const noIris = () => undefined;
-const IRIS_R = (EYES_W / 2) * 0.42 * 0.95;
+// the pair: both eyes from the photo, as they sit in it, at 0.85x, their midpoint on the card's
+const PAIR_S = 0.85, PAIR_MID: P = [(LEFT.mid[0] + RIGHT.mid[0]) / 2, (LEFT.mid[1] + RIGHT.mid[1]) / 2], PAIR_C: P = [CX, 1000];
+const pairPlace = (E: PEye): Place => ({ c: [PAIR_C[0] + (E.mid[0] - PAIR_MID[0]) * PAIR_S, PAIR_C[1] + (E.mid[1] - PAIR_MID[1]) * PAIR_S], s: PAIR_S });
+const PAIR = (mode: "base" | "noIris") => (lg: Gfx) => { EYE_PARTS(LEFT, pairPlace(LEFT), mode, 700)(lg); EYE_PARTS(RIGHT, pairPlace(RIGHT), mode, 740)(lg); };
 const STARS: [P, P] = [[CX - 200, 1020], [CX + 200, 1030]];
 // the curtain from one corner, painted big enough to cover the whole card, laid down smaller as it sweeps back
 const CURTAIN_R = 1260;
@@ -148,36 +215,38 @@ const frame = (g: Gfx, f: number) => {
     const fall = f >= 60 ? { dy: [60, 220, 520, 1100][f - 60], rot: [-0.08, -0.26, -0.55, -0.9][f - 60] } : { dy: 0, rot: 0 }, b = f > 49 && f < 60 ? boil(f, 3) : { dx: 0, dy: 0, rot: 0 };
     sprite(g, "plaster", PLASTER_S, { px: CX, py: PLASTER_AT[1], dx: dx + b.dx, dy: fall.dy + b.dy, rot: r0 + fall.rot + b.rot });
     if (f >= 47 && f <= 52) { const k = step(f, 47, [0.4, 0.8, 1]); lay(g, [st([[EYE_A[0] - 150 * k, EYE_A[1]], [EYE_A[0], EYE_A[1] + 1], [EYE_A[0] + 150 * k, EYE_A[1]]], 6, "#3a1a10", 450, { impasto: 0.2, dry: 0.05, load: 1.2 })]); }
-    if (f >= 53 && f <= 55) paintEye(g, EYE_A[0], EYE_A[1], 300, [0.15, 0.4, 0.7][f - 53], null, 360);
+    if (f >= 53 && f <= 55) sprite(g, "eyeA", EYE_A_S, { px: EYE_A[0], py: EYE_A[1], sy: [0.15, 0.4, 0.7][f - 53] });
   }
   // 4. the eye: opened in the band-aid, it rises as the band-aid falls away, then closes over the lily
-  if (f >= 56 && f <= 73) { const up = f < 60 ? 0 : step(f, 60, [-20, -70, -130, -180, -220, -245, -252]), b = f >= 66 ? boil(f, 5) : { dx: 0, dy: 0, rot: 0 }; sprite(g, "eyeA", (lg) => paintEye(lg, EYE_A[0], EYE_A[1], 300, 1, null, 360), { dy: up + b.dy, dx: b.dx }); }
+  if (f >= 56 && f <= 73) { const up = f < 60 ? 0 : step(f, 60, [-20, -70, -130, -180, -220, -245, -252]), b = f >= 66 ? boil(f, 5) : { dx: 0, dy: 0, rot: 0 }; sprite(g, "eyeA", EYE_A_S, { dy: up + b.dy, dx: b.dx }); }
   // 5. the wound's line curls round into the lily's outline; the tepals are drawn; red bleeds out of the
   //    eye's tear into the flower and the fill lands
   if (f === 60) sprite(g, "wound", (lg) => paintWound(lg, WOUND, 200));
   if (f >= 61 && f <= 66) morphLine(g, woundLine(), LILY_LOOP, [0.12, 0.3, 0.5, 0.7, 0.88, 1][f - 61], 9, 470 + f);
-  if (f >= 67 && f <= 69) lilyDrawing(g, 1, [0.25, 0.45, 0.62][f - 67], 400);
+  if (f >= 67 && f <= 69) {
+    sprite(g, "lily", (lg) => paintLily(lg, 400), { circle: [LILY_C[0], LILY_C[1], [110, 220, 320][f - 67]] });
+    const { pets } = lilyPetals(); lay(g, pets.map((pt, i) => st(thin([...pt, pt[0]], 20), 7, "#5a0610", 410 + i, { c1: "#8a0e18", impasto: 0.25, dry: 0.1, load: 1.2 })));
+  }
   if (f >= 66 && f <= 69) { const k = step(f, 66, [0.4, 0.8, 1, 1]); lay(g, [st([[CX + 6, 700], [CX + 2, 700 + 140 * k], [CX, 700 + 290 * k]], 11, "#a3191c", 471, { c1: "#760f14", impasto: 0.4, dry: 0.3 })]); }
   if (f >= 70 && f <= 97) { const b = boil(f, 7); sprite(g, "lily", (lg) => paintLily(lg, 400), { px: LILY_C[0], py: LILY_C[1], dx: b.dx, dy: b.dy, rot: b.rot, alpha: f < 92 ? 1 : step(f, 92, [0.8, 0.6, 0.4, 0.22, 0.08, 0]) }); }
   // the eye over the lily closes; a single drop of dew is left, and falls onto a petal
-  if (f >= 74 && f <= 76) paintEye(g, CX, 640, 300, [0.6, 0.3, 0.08][f - 74], null, 360);
-  if (f >= 77 && f <= 87) { const t = step(f, 77, [0, 0, 0.12, 0.35, 0.65, 0.92, 1.04, 1]); const x = CX + (DROP_ON[0] - CX) * t, y = 650 + (DROP_ON[1] - 650) * t - Math.sin(Math.PI * clamp(t)) * 60; paintDrop(g, x, y, f === 77 ? 18 : 30, 480); }
+  if (f >= 74 && f <= 76) sprite(g, "eyeA", EYE_A_S, { px: EYE_A[0], py: EYE_A[1], dy: EYE_UP, sy: [0.6, 0.3, 0.08][f - 74] });
+  if (f >= 77 && f <= 87) { const t = step(f, 77, [0, 0, 0.12, 0.35, 0.65, 0.92, 1.04, 1]); const x = CX + (DROP_ON[0] - CX) * t, y = 650 + (DROP_ON[1] - 650) * t - Math.sin(Math.PI * clamp(t)) * 60; paintDrop(g, x, y, f === 77 ? 30 : DROP_R, 480); }
   word(g, f, 68, 96, "फूल पे", 270, 1460, 92, "#8a0e22"); word(g, f, 76, 96, "शबनम", 800, 1460, 92, "#8a0e22");
   // 6. the drop swells into a dark disc that eclipses the lily, and becomes the world, its land landing piece by piece
-  if (f >= 88 && f <= 95) { const t = (f - 88) / 7, r = 30 + (GLOBE_R - 30) * Math.pow(t, 1.4), x = DROP_ON[0] + (GLOBE_C[0] - DROP_ON[0]) * t, y = DROP_ON[1] + (GLOBE_C[1] - DROP_ON[1]) * t; sprite(g, "disc", DISC, { px: GLOBE_C[0], py: GLOBE_C[1], sx: r / GLOBE_R, sy: r / GLOBE_R, dx: x - GLOBE_C[0], dy: y - GLOBE_C[1] }); }
-  if (f >= 96 && f <= 111) { const n = f < 98 ? 0 : f < 99 ? 1 : f < 101 ? 2 : f < 103 ? 3 : 4, s = f < 108 ? 1 : step(f, 108, [0.97, 0.94, 0.92, 0.9]), b = boil(f, 9); sprite(g, `globe${n}`, (lg) => globeIris(lg, GLOBE_C[0], GLOBE_C[1], GLOBE_R, n), { px: GLOBE_C[0], py: GLOBE_C[1], sx: s, sy: s, dx: b.dx, dy: b.dy + (f >= 108 ? 11 * (1 - (s - 0.9) * 10) : 0) }); }
+  if (f >= 88 && f <= 95) { const t = (f - 88) / 7, r = DROP_R + (GLOBE_R - DROP_R) * Math.pow(t, 1.4), x = DROP_ON[0] + (GLOBE_C[0] - DROP_ON[0]) * t, y = DROP_ON[1] + (GLOBE_C[1] - DROP_ON[1]) * t; sprite(g, "disc", DISC, { px: GLOBE_C[0], py: GLOBE_C[1], sx: r / GLOBE_R, sy: r / GLOBE_R, dx: x - GLOBE_C[0], dy: y - GLOBE_C[1] }); }
+  if (f >= 96 && f <= 111) { const n = f < 98 ? 0 : f < 99 ? 1 : f < 101 ? 2 : f < 103 ? 3 : 4, r = f < 108 ? GLOBE_R : GLOBE_R + (IRIS_GR - GLOBE_R) * step(f, 108, [0.25, 0.5, 0.75, 1]); if (f >= 111) sprite(g, "globeEyeBase", GE_BASE); liveGlobe(g, f, r, n, 1, f >= 111); }
   if (f >= 97 && f <= 111) { const ws: [number, string][] = [[97, "जग"], [100, "भूले"], [103, "भूले"]]; ws.forEach(([f0, w], i) => { if (f >= f0) { const a = -Math.PI * 0.78 + (Math.PI * 0.56 * i) / 2; handLine(g, w, GLOBE_C[0] + Math.cos(a) * (GLOBE_R + 52), GLOBE_C[1] + Math.sin(a) * (GLOBE_R + 52), 80, "#0b6670", { tilt: a + Math.PI / 2 }); } }); }
   // 7. an eye is drawn round the world: the upper lid, the lashes, the lower lid; the white lands; the world is its iris
   if (f >= 104 && f <= 111) {
     const ku = step(f, 104, [0.2, 0.4, 0.6, 0.8, 1]), kl = f < 106 ? 0 : step(f, 106, [0.3, 0.6, 0.85, 1]);
     lay(g, [st(thin(UPPER.slice(0, Math.max(3, Math.round(119 * ku))), 16), 8, "#140806", 520, { impasto: 0.25, dry: 0.06, load: 1.25 })]);
     if (kl > 0) lay(g, [st(thin(LOWER.slice(Math.round(119 * (1 - kl))).reverse(), 14), 5, "#3a1a10", 521, { impasto: 0.15, dry: 0.15 })]);
-    const nl = f < 109 ? 0 : (f - 108) * 4; for (let i = 0; i < Math.min(13, nl); i++) { const p = UPPER[Math.round((0.3 + i * 0.052) * 119)], L = 34 + i * 4.5, a = -Math.PI / 2 - 0.35 + i * 0.1; lay(g, [st([p, [p[0] + Math.cos(a) * L * 0.55, p[1] + Math.sin(a) * L * 0.55], [p[0] + Math.cos(a + 0.75) * L, p[1] + Math.sin(a + 0.75) * L * 0.95]], 6, "#100604", 530 + i, { impasto: 0.2, dry: 0.15, load: 1.2 })]); }
+    if (f >= 109) { const k = [0.4, 0.75, 1][f - 109], x0 = UPPER[0][0] - 40, x1 = UPPER[119][0] + 60; sprite(g, "globeEyeLash", GE_LASH, { clip: [x0, 0, x0 + (x1 - x0) * k, H] }); }
   }
-  if (f >= 112 && f <= 119) { const b = boil(f, 11); sprite(g, "globeEye", GLOBE_EYE, { px: GLOBE_C[0], py: GLOBE_C[1], dx: b.dx, dy: b.dy, rot: b.rot }); }
+  if (f >= 112 && f <= 125) { const sy = f < 120 ? 1 : [0.7, 0.7, 0.4, 0.4, 0.15, 0.15][f - 120], m = { px: GLOBE_C[0], py: GE_MID[1], sy }; sprite(g, "globeEyeBase", GE_BASE, m); liveGlobe(g, f, IRIS_GR, 4, sy, true); sprite(g, "globeEyeLash", GE_LASH, m); }
   // 8. the eye blinks shut; its lower lid is left as a smile; the smile curls on round into a heart
-  if (f >= 120 && f <= 125) paintEye(g, GLOBE_C[0], GLOBE_C[1], EYE_W, [0.7, 0.7, 0.4, 0.4, 0.15, 0.15][f - 120], (gg, cx, cy, r) => globeIris(gg, cx, cy, r, 4), 500);
-  if (f >= 126 && f <= 127) { const smile = LOWER.map(([x, y]) => [x, y - 10] as P); morphLine(g, smile, heartLine(0.35), f === 126 ? 0.3 : 0.65, 10, 560 + f); }
+  if (f >= 126 && f <= 127) { const smile = LOWER; morphLine(g, smile, heartLine(0.35), f === 126 ? 0.3 : 0.65, 10, 560 + f); }
   if (f >= 128 && f <= 134) heartDrawing(g, HEART_C[0], HEART_C[1], HEART_S, step(f, 128, [0.35, 0.55, 0.75, 0.9, 1, 1, 1]), step(f, 128, [0, 0, 0, 0, 0, 150, 270]), 600);
   if (f >= 135 && f <= 139) { const b = boil(f, 13); sprite(g, "heart", (lg) => heartDrawing(lg, HEART_C[0], HEART_C[1], HEART_S, 1, 420, 600), { px: HEART_C[0], py: HEART_C[1], dx: b.dx, dy: b.dy, rot: b.rot }); }
   word(g, f, 128, 144, "दिल", 380, 520, 110, "#4a1238"); word(g, f, 130, 144, "छूलें", 640, 520, 110, "#4a1238"); word(g, f, 136, 144, "छूलें", CX, 650, 96, "#4a1238");
@@ -185,9 +254,14 @@ const frame = (g: Gfx, f: number) => {
   if (f >= 140 && f <= 143) { const k = [0.25, 0.5, 0.8, 1][f - 140]; [-1, 1].forEach((s) => sprite(g, "heart", (lg) => heartDrawing(lg, HEART_C[0], HEART_C[1], HEART_S, 1, 420, 600), { px: HEART_C[0], py: HEART_C[1], dx: s * 200 * k, rot: s * 0.5 * k, sy: 1 - 0.55 * k, clip: s < 0 ? [0, 0, HEART_C[0], H] : [HEART_C[0], 0, W, H] })); }
   if (f >= 144 && f <= 175) {
     const open = f < 146 ? [0.4, 0.75][f - 144] : f >= 172 ? [0.6, 0.3, 0.1, 0.02][f - 172] : 1, b = f >= 146 && f < 172 ? boil(f, 15) : { dx: 0, dy: 0, rot: 0 };
-    sprite(g, f >= 146 && f < 172 ? "twoEyes" : "almonds", (lg) => EYES.forEach(([x, y], i) => paintEye(lg, x, y, EYES_W, 1, f >= 146 && f < 172 ? null : noIris, 700 + i * 40)), { px: CX, py: EYES[0][1], sy: open, dx: b.dx, dy: b.dy });
+    const full = f >= 146 && f < 172; sprite(g, full ? "pairEyes" : "pairNoIris", PAIR(full ? "base" : "noIris"), { px: PAIR_C[0], py: PAIR_C[1], sy: open, dx: b.dx, dy: b.dy });
     // the irises drop out of the closing eyes and fall away
-    if (f >= 172) EYES.forEach(([x, y], i) => { const dy = [20, 120, 300, 560][f - 172], cy = y + 8 + dy, d = ellipse(x, cy, IRIS_R, IRIS_R, 28), n = sphereN(x, cy, IRIS_R); paintForm(g, d, (px, py) => ramp(TURQ, 0.1 + 0.6 * litN(n(px, py))), 6, tangentDir(x, cy), 750 + i + f * 3, true); lay(g, [st(ellipse(x, cy, IRIS_R * 0.42, IRIS_R * 0.42, 14).concat([[x + IRIS_R * 0.42, cy]]), IRIS_R * 0.36, "#080302", 760 + i + f * 3, { impasto: 0.1, dry: 0.05 })]); });
+    // the irises drop out of the closing eyes and fall away, each still the photo's own iris
+    if (f >= 172) ([LEFT, RIGHT] as PEye[]).forEach((E, i) => {
+      const T = pairPlace(E), ic = toFilm(E, T)(E.iris), dy = [20, 120, 300, 560][f - 172], r = E.ir * T.s * 1.02, cy = ic[1] + dy, disc = ellipse(ic[0], cy, r, r, 30), S = photo(g.env);
+      lay(g, fill({ region: [[ic[0] - r - 8, cy - r - 8], [ic[0] + r + 8, cy - r - 8], [ic[0] + r + 8, cy + r + 8], [ic[0] - r - 8, cy + r + 8]], step: 3, len: 10, w: 5, dir: (x, y) => Math.atan2(y - cy, x - ic[0]) + Math.PI / 2, seed: 750 + i + f * 3, load: 1.15, dry: 0.12, impasto: 0.15, jit: 0.02, soft: 0.2, color: (x, y) => { if (Math.hypot(x - ic[0], y - cy) > r) return null; const [rr, gg, bb] = S.rgb(E.iris[0] + (x - ic[0]) / T.s, E.iris[1] + (y - cy) / T.s); return hex(rr, gg, bb); }, sweep: 0 }), [disc]);
+      contour(g, disc, "#120806", 2.5, 770 + i + f);
+    });
   }
   // 10. two stars pop where the eyes were, and blush
   if (f >= 176 && f <= 190) STARS.forEach(([x, y], i) => {
@@ -220,6 +294,6 @@ const frame = (g: Gfx, f: number) => {
 
 export const naina: Film = {
   meta: { title: "Naina · a lyric film in oil", W, H, fps: 12, bpm: 120, durationFrames: N, raster: "cpu" },
-  assets: { images: {} },
+  assets: { images: { eye: "out/assets/eye-ref.png" } }, // the person's photo: steers the eyes, never shown; kept out of the repository
   shots: [{ id: "film", start: 0, end: N, draw: (ctx: Ctx, f: number, env: Env) => { const g = new Gfx(ctx, env, f, OIL_M); frame(g, f); weave(g, 0.28); } }],
 };

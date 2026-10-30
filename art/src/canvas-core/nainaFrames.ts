@@ -234,12 +234,19 @@ const paintDrop = (g: Gfx, cx: number, cy: number, r: number, seed: number) => {
   paintForm(g, poly, (x, y) => mix(ramp(TURQ, 0.35 + 0.55 * clamp(1 - lit(n(x, y))) * 0.6 + 0.3 * clamp((y - cy) / r)), "#a3191c", 0.25), 5, tangentDir(cx, cy), seed);
   contour(g, poly, "#0a1420", 2.6, seed + 3); glint(g, [cx - r * 0.38, cy - r * 0.42], r * 0.42, -0.7, r * 0.28, seed + 4); lay(g, [st(ellipse(cx + r * 0.1, cy + r * 0.2, r * 0.6, r * 0.55, 12, 0.2, 1.6), 3, "#c8e4ec", seed + 5, { impasto: 0.4 })]);
 };
-const globeIris = (g: Gfx, cx: number, cy: number, r: number, lands = 4) => {
+// the world: continents laid on the sphere by longitude and latitude, so the globe can TURN (spin, in
+// radians of longitude): each coast is projected through the sphere, a land on the far side is hidden,
+// and its edge slides round the limb as it comes into view. `lands` lands the first few, one by one.
+const LANDS: [number, number, number, number][] = [[-0.25, -0.2, 0.32, 910], [0.32, 0.25, 0.28, 911], [0.05, 0.62, 0.18, 912], [0.55, -0.45, 0.16, 913], [2.7, 0.08, 0.36, 914], [-2.4, -0.32, 0.26, 915]].map(([u, v, k, sd], i) => i < 4 ? [Math.asin(u / Math.cos(Math.asin(v))), Math.asin(v), k, sd] : [u, v, k, sd]);
+const globeIris = (g: Gfx, cx: number, cy: number, r: number, lands = 4, spin = 0) => {
   const disc = ellipse(cx, cy, r, r, 60), n = sphereN(cx, cy, r);
   paintForm(g, disc, (x, y) => ramp(TURQ, plane(lit(n(x, y))) * 0.9 + 0.08), 9, tangentDir(cx, cy), 900);
-  // continents: blobs wrapped onto the sphere, pressed toward the limb so they read as round
-  const blob = (u: number, v: number, s: number, sd: number): P[] => Array.from({ length: 28 }, (_, i) => { const a = (i / 28) * Math.PI * 2, k = s * (0.7 + 0.5 * fractal(sd, Math.cos(a) * 2 + 5, Math.sin(a) * 2 + 5, 0.9, 0.9, 2)); let x = u + Math.cos(a) * k, y = v + Math.sin(a) * k * 1.2; const d = Math.hypot(x, y); if (d > 0.96) { x *= 0.96 / d; y *= 0.96 / d; } return [cx + x * r, cy + y * r] as P; });
-  [blob(-0.25, -0.2, 0.32, 910), blob(0.32, 0.25, 0.28, 911), blob(0.05, 0.62, 0.18, 912), blob(0.55, -0.45, 0.16, 913)].slice(0, lands).forEach((b, i) => withClip(g, [disc], () => paintForm(g, b, (x, y) => ramp(LAND, plane(lit(n(x, y))) * 0.95 + 0.05), 7, tangentDir(cx, cy), 920 + i * 5)));
+  const proj = (lon: number, lat: number): [number, number, number] => [Math.cos(lat) * Math.sin(lon + spin), Math.sin(lat), Math.cos(lat) * Math.cos(lon + spin)];
+  LANDS.slice(0, lands >= 4 ? LANDS.length : lands).forEach(([lon0, lat0, k0, sd], i) => {
+    if (proj(lon0, lat0)[2] < -0.2) return;
+    const b: P[] = Array.from({ length: 28 }, (_, j) => { const a = (j / 28) * Math.PI * 2, k = k0 * (0.7 + 0.5 * fractal(sd, Math.cos(a) * 2 + 5, Math.sin(a) * 2 + 5, 0.9, 0.9, 2)); let [x, y, z] = proj(lon0 + (Math.cos(a) * k) / Math.cos(lat0), lat0 + Math.sin(a) * k * 1.2); if (z < 0) { const d = Math.hypot(x, y) || 1; x /= d; y /= d; } const d = Math.hypot(x, y); if (d > 0.97) { x *= 0.97 / d; y *= 0.97 / d; } return [cx + x * r, cy + y * r] as P; });
+    withClip(g, [disc], () => paintForm(g, b, (x, y) => ramp(LAND, plane(lit(n(x, y))) * 0.95 + 0.05), 7, tangentDir(cx, cy), 920 + i * 5));
+  });
   lay(g, [st(ellipse(cx, cy, r - 3, r - 3, 40).concat([[cx + r - 3, cy]]), 7, "#0a1420", 950, { impasto: 0.15, dry: 0.05 })]);
   glint(g, [cx - r * 0.42, cy - r * 0.42], r * 0.3, -0.75, r * 0.12, 951);
   lay(g, [st(ellipse(cx, cy, r * 0.8, r * 0.8, 16, Math.PI * 1.05, Math.PI * 1.45), 4, "#e8f2f4", 952, { impasto: 0.6, dry: 0.2 })]);
@@ -249,6 +256,8 @@ const globeIris = (g: Gfx, cx: number, cy: number, r: number, lands = 4) => {
 const star = (cx: number, cy: number, R: number, a0: number, curl: number): P[] => { const ctrl: P[] = []; for (let i = 0; i < 10; i++) { const a = a0 + (i * Math.PI) / 5 + (i % 2 ? 0 : curl * 0.12), r = i % 2 ? R * 0.46 : R; ctrl.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]); } return smooth(ctrl, true, 14); };
 const paintStar = (g: Gfx, cx: number, cy: number, R: number, seed: number, tilt: number, blush = 1) => {
   const p = star(cx, cy, R, -Math.PI / 2 + tilt, 1), n = pillowN(p, R * 0.22);
+  // a solid lay-in of the mid gold first, so the strokes over it never break open onto the card
+  { const c = g.cur; g.touch(cx - R, cy - R, cx + R, cy + R); c.save(); c.fillStyle = ramp(GOLD, 0.62); c.beginPath(); p.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.closePath(); c.fill(); c.restore(); }
   paintForm(g, p, objCol(GOLD, n, 1.2), 15, tangentDir(cx, cy), seed, true); contour(g, p, "#3a1002", 4.5, seed + 5);
   // shy: eyes squeezed shut in two little arcs, cheeks flushed red in thin glazes
   lay(g, [st([[cx - R * 0.28, cy - R * 0.02], [cx - R * 0.2, cy - R * 0.08], [cx - R * 0.12, cy - R * 0.02]], 4.5, "#3a1002", seed + 6, { impasto: 0.2, dry: 0.1 }), st([[cx + R * 0.12, cy - R * 0.02], [cx + R * 0.2, cy - R * 0.08], [cx + R * 0.28, cy - R * 0.02]], 4.5, "#3a1002", seed + 7, { impasto: 0.2, dry: 0.1 }),
