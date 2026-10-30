@@ -1,3 +1,5 @@
 node_modules/
 art/out/
 *.log
+# the song is a commercial track: kept local, not committed
+art/assets/audio/
