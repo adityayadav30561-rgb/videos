@@ -35,3 +35,10 @@ a modified version may not use the reserved name. We ship it unmodified.
 - Why: a serif display face and a plain text face for the worked example of a custom look, so the template
   is proven on fonts that are not ours. A film imports them by path (`import f from ".../Lora-Bold.ttf"`);
   tools/overlay.mjs inlines the bytes, so the page carries them and nothing is read or fetched at draw time.
+
+## Kalam (Regular, Bold) and Yatra One: Devanagari faces for the lyric films
+
+- Files: `Kalam-Regular-devanagari.woff2`, `Kalam-Bold-devanagari.woff2`, `YatraOne-devanagari.woff2` (the Devanagari subsets, woff2), carried as base64 in `devanagari.ts`; sha256 of each is written beside it there.
+- Kalam: Copyright 2014 Indian Type Foundry. Yatra One: Copyright 2014 The Yatra Project Authors. Both SIL Open Font License 1.1, full texts in `Kalam-OFL.txt` and `YatraOne-OFL.txt`.
+- Source: the Google Fonts releases as published on npm by Fontsource: `@fontsource/kalam@5.3.0` and `@fontsource/yatra-one@5.3.0` (`files/*-devanagari-*.woff2`), fetched 2026-10-30. (raw.githubusercontent was not reachable from the build machine; the npm packages carry the same OFL files.)
+- Why: Kalam is a handwritten Devanagari for lyric lines; Yatra One a chunky brush display face for the big words. Shipped unmodified.
