@@ -234,12 +234,12 @@ const paintDrop = (g: Gfx, cx: number, cy: number, r: number, seed: number) => {
   paintForm(g, poly, (x, y) => mix(ramp(TURQ, 0.35 + 0.55 * clamp(1 - lit(n(x, y))) * 0.6 + 0.3 * clamp((y - cy) / r)), "#a3191c", 0.25), 5, tangentDir(cx, cy), seed);
   contour(g, poly, "#0a1420", 2.6, seed + 3); glint(g, [cx - r * 0.38, cy - r * 0.42], r * 0.42, -0.7, r * 0.28, seed + 4); lay(g, [st(ellipse(cx + r * 0.1, cy + r * 0.2, r * 0.6, r * 0.55, 12, 0.2, 1.6), 3, "#c8e4ec", seed + 5, { impasto: 0.4 })]);
 };
-const globeIris = (g: Gfx, cx: number, cy: number, r: number) => {
+const globeIris = (g: Gfx, cx: number, cy: number, r: number, lands = 4) => {
   const disc = ellipse(cx, cy, r, r, 60), n = sphereN(cx, cy, r);
   paintForm(g, disc, (x, y) => ramp(TURQ, plane(lit(n(x, y))) * 0.9 + 0.08), 9, tangentDir(cx, cy), 900);
   // continents: blobs wrapped onto the sphere, pressed toward the limb so they read as round
   const blob = (u: number, v: number, s: number, sd: number): P[] => Array.from({ length: 28 }, (_, i) => { const a = (i / 28) * Math.PI * 2, k = s * (0.7 + 0.5 * fractal(sd, Math.cos(a) * 2 + 5, Math.sin(a) * 2 + 5, 0.9, 0.9, 2)); let x = u + Math.cos(a) * k, y = v + Math.sin(a) * k * 1.2; const d = Math.hypot(x, y); if (d > 0.96) { x *= 0.96 / d; y *= 0.96 / d; } return [cx + x * r, cy + y * r] as P; });
-  [blob(-0.25, -0.2, 0.32, 910), blob(0.32, 0.25, 0.28, 911), blob(0.05, 0.62, 0.18, 912), blob(0.55, -0.45, 0.16, 913)].forEach((b, i) => withClip(g, [disc], () => paintForm(g, b, (x, y) => ramp(LAND, plane(lit(n(x, y))) * 0.95 + 0.05), 7, tangentDir(cx, cy), 920 + i * 5)));
+  [blob(-0.25, -0.2, 0.32, 910), blob(0.32, 0.25, 0.28, 911), blob(0.05, 0.62, 0.18, 912), blob(0.55, -0.45, 0.16, 913)].slice(0, lands).forEach((b, i) => withClip(g, [disc], () => paintForm(g, b, (x, y) => ramp(LAND, plane(lit(n(x, y))) * 0.95 + 0.05), 7, tangentDir(cx, cy), 920 + i * 5)));
   lay(g, [st(ellipse(cx, cy, r - 3, r - 3, 40).concat([[cx + r - 3, cy]]), 7, "#0a1420", 950, { impasto: 0.15, dry: 0.05 })]);
   glint(g, [cx - r * 0.42, cy - r * 0.42], r * 0.3, -0.75, r * 0.12, 951);
   lay(g, [st(ellipse(cx, cy, r * 0.8, r * 0.8, 16, Math.PI * 1.05, Math.PI * 1.45), 4, "#e8f2f4", 952, { impasto: 0.6, dry: 0.2 })]);
@@ -247,12 +247,12 @@ const globeIris = (g: Gfx, cx: number, cy: number, r: number) => {
 // a five-pointed star with plump, slightly curling arms: ten points (tips and the notches between),
 // smoothed into one rounded outline, the tips swept a little round like the reference's starfish stars
 const star = (cx: number, cy: number, R: number, a0: number, curl: number): P[] => { const ctrl: P[] = []; for (let i = 0; i < 10; i++) { const a = a0 + (i * Math.PI) / 5 + (i % 2 ? 0 : curl * 0.12), r = i % 2 ? R * 0.46 : R; ctrl.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]); } return smooth(ctrl, true, 14); };
-const paintStar = (g: Gfx, cx: number, cy: number, R: number, seed: number, tilt: number) => {
+const paintStar = (g: Gfx, cx: number, cy: number, R: number, seed: number, tilt: number, blush = 1) => {
   const p = star(cx, cy, R, -Math.PI / 2 + tilt, 1), n = pillowN(p, R * 0.22);
   paintForm(g, p, objCol(GOLD, n, 1.2), 15, tangentDir(cx, cy), seed, true); contour(g, p, "#3a1002", 4.5, seed + 5);
   // shy: eyes squeezed shut in two little arcs, cheeks flushed red in thin glazes
   lay(g, [st([[cx - R * 0.28, cy - R * 0.02], [cx - R * 0.2, cy - R * 0.08], [cx - R * 0.12, cy - R * 0.02]], 4.5, "#3a1002", seed + 6, { impasto: 0.2, dry: 0.1 }), st([[cx + R * 0.12, cy - R * 0.02], [cx + R * 0.2, cy - R * 0.08], [cx + R * 0.28, cy - R * 0.02]], 4.5, "#3a1002", seed + 7, { impasto: 0.2, dry: 0.1 }),
-    st([[cx - R * 0.36, cy + R * 0.12], [cx - R * 0.28, cy + R * 0.13], [cx - R * 0.2, cy + R * 0.12]], R * 0.14, "#e0283a", seed + 8, { alpha: 0.55, impasto: 0, dry: 0.5 }), st([[cx + R * 0.2, cy + R * 0.12], [cx + R * 0.28, cy + R * 0.13], [cx + R * 0.36, cy + R * 0.12]], R * 0.14, "#e0283a", seed + 9, { alpha: 0.55, impasto: 0, dry: 0.5 }),
+    st([[cx - R * 0.36, cy + R * 0.12], [cx - R * 0.28, cy + R * 0.13], [cx - R * 0.2, cy + R * 0.12]], R * 0.14, "#e0283a", seed + 8, { alpha: 0.55 * blush + 0.001, impasto: 0, dry: 0.5 }), st([[cx + R * 0.2, cy + R * 0.12], [cx + R * 0.28, cy + R * 0.13], [cx + R * 0.36, cy + R * 0.12]], R * 0.14, "#e0283a", seed + 9, { alpha: 0.55 * blush + 0.001, impasto: 0, dry: 0.5 }),
     st([[cx - R * 0.08, cy + R * 0.16], [cx, cy + R * 0.2], [cx + R * 0.08, cy + R * 0.16]], 3.5, "#3a1002", seed + 10, { impasto: 0.15 })]);
   for (let k = 0; k < 5; k++) { const a = -Math.PI / 2 + tilt + (k * 2 * Math.PI) / 5, gx = cx + Math.cos(a) * R * 0.55 - Math.sin(a) * R * -0.07, gy = cy + Math.sin(a) * R * 0.55 + Math.cos(a) * R * -0.07; if (Math.cos(a) * L3[0] + Math.sin(a) * L3[1] > -0.3) glint(g, [gx, gy], R * 0.2, a, 6, seed + 11 + k, "#fff2d0"); }
 };
@@ -327,3 +327,7 @@ export const nainaFrames: Film = {
   assets: { images: {} },
   shots: FRAMES.map((fn, i) => ({ id: `frame${i + 1}`, start: i * 6, end: i * 6 + 6, draw: (ctx: Ctx, _f: number, env: Env) => { const g = new Gfx(ctx, env, 0, OIL_M); fn(g); weave(g, 0.28); } })),
 };
+
+// the painters, for the film that animates these frames (naina.ts)
+export { W, H, CX, CY, OIL_M, CARD, LILY_C, PLASTER_AT, GOLD, CRIMSON, TURQ, ROSE, INDIGO, PLASTER, BULLA, NAINA, ramp, rng, st, lay, withClip, stage, glossyWord, handLine, sparkle, paintForm, contour, glint, objCol, pillowN, sphereN, tangentDir, along, rot, ellipse, thin, edgeDist, woundPoly, paintWound, paintEye, lilyPetals, paintLily, lilyDrawing, paintDrop, globeIris, star, paintStar, heartPt, heartDrawing, curtain, arcWords };
+export type { Glossy };
