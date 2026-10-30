@@ -13,13 +13,14 @@ export type GlyphField = { x0: number; y0: number; w: number; h: number; d: Floa
 type Layer = { canvas: unknown; ctx: CanvasRenderingContext2D };
 
 export const glyphField = (env: Env, text: string, fam: string, size: number, x: number, y: number, align: CanvasTextAlign = "center", tilt = 0): GlyphField => {
-  const key = `ptype:${fam}:${size}:${x}:${y}:${align}:${tilt}:${text}`, hit = env.cache.get(key) as GlyphField | undefined; if (hit) return hit;
+  // not cached: a field is needed only while its word is first painted (the painted word is cached as a sprite)
   const font = `${size}px "${fam}"`, M = env.canvas(8, 8) as unknown as Layer; M.ctx.font = font; const tw = M.ctx.measureText(text).width;
   const cxT = x + (align === "left" ? (tw / 2) * Math.cos(tilt) : align === "right" ? -(tw / 2) * Math.cos(tilt) : 0), cyT = y + (align === "left" ? (tw / 2) * Math.sin(tilt) : align === "right" ? -(tw / 2) * Math.sin(tilt) : 0);
   const R = Math.ceil(Math.hypot(tw / 2, size * 0.9) + size * 0.25), x0 = Math.floor(cxT - R), y0 = Math.floor(cyT - R), w = 2 * R, h = 2 * R;
   const L = env.canvas(w, h) as unknown as Layer, c = L.ctx; c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h);
   c.translate(x - x0, y - y0); c.rotate(tilt); c.font = font; c.textAlign = align; c.textBaseline = "middle"; c.fillStyle = "#000"; c.fillText(text, 0, 0);
-  const a = c.getImageData(0, 0, w, h).data, n = w * h, d = new Float32Array(n), BIG = 1e6;
+  const a = c.getImageData(0, 0, w, h).data; (L.canvas as { width: number }).width = 1; (M.canvas as { width: number }).width = 1;
+  const n = w * h, d = new Float32Array(n), BIG = 1e6;
   for (let i = 0; i < n; i++) d[i] = a[i * 4 + 3] > 110 ? BIG : 0;
   // chamfer distance to the nearest outside pixel, two passes
   const D = 1.4142;
@@ -29,7 +30,7 @@ export const glyphField = (env: Env, text: string, fam: string, size: number, x:
   const s = new Float32Array(n); for (let j = 1; j < h - 1; j++) for (let i = 1; i < w - 1; i++) { const k = j * w + i; s[k] = (d[k] * 4 + d[k - 1] + d[k + 1] + d[k - w] + d[k + w]) / 8; }
   const gx = new Float32Array(n), gy = new Float32Array(n); let T = 0, top = h, bot = 0;
   for (let j = 2; j < h - 2; j++) for (let i = 2; i < w - 2; i++) { const k = j * w + i; if (!d[k]) continue; gx[k] = (s[k + 1] - s[k - 1]) / 2; gy[k] = (s[k + w] - s[k - w]) / 2; if (d[k] > T) T = d[k]; if (j < top) top = j; if (j > bot) bot = j; }
-  const F = { x0, y0, w, h, d, gx, gy, T, top: y0 + top, bot: y0 + bot }; env.cache.set(key, F); return F;
+  return { x0, y0, w, h, d, gx, gy, T, top: y0 + top, bot: y0 + bot };
 };
 
 export type Brush = { color: (x: number, y: number, t: number) => string; seed: number; widthK?: number; grow?: number; off?: P; alpha?: number; impasto?: number; dry?: number; step?: number; only?: (d: number, gx: number, gy: number, T: number) => boolean; lenK?: number };

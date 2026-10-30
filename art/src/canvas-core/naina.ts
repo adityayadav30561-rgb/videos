@@ -39,7 +39,7 @@ import {
 const N = 229; // the song: 19.18 s at 12 fps
 
 // ---------------------------------------------------------------- sprites: a picture painted once, laid down many times
-const SPRITES_KEPT = 14;
+const SPRITES_KEPT = 8;
 type M = { px?: number; py?: number; sx?: number; sy?: number; rot?: number; skew?: number; dx?: number; dy?: number; alpha?: number; clip?: [number, number, number, number]; circle?: [number, number, number] };
 const sprite = (g: Gfx, key: string, paint: (lg: Gfx) => void, m: M = {}) => {
   const e = g.env, DW = Math.round(e.W * e.scale), DH = Math.round(e.H * e.scale), k = `naina:sprite:${key}:${DW}x${DH}`;
