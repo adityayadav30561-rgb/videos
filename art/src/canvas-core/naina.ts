@@ -38,11 +38,19 @@ import {
 const N = 229; // the song: 19.18 s at 12 fps
 
 // ---------------------------------------------------------------- sprites: a picture painted once, laid down many times
+const SPRITES_KEPT = 8;
 type M = { px?: number; py?: number; sx?: number; sy?: number; rot?: number; skew?: number; dx?: number; dy?: number; alpha?: number; clip?: [number, number, number, number] };
 const sprite = (g: Gfx, key: string, paint: (lg: Gfx) => void, m: M = {}) => {
   const e = g.env, DW = Math.round(e.W * e.scale), DH = Math.round(e.H * e.scale), k = `naina:sprite:${key}:${DW}x${DH}`;
   let L = e.cache.get(k) as { canvas: unknown; ctx: CanvasRenderingContext2D } | undefined;
-  if (!L) { L = e.canvas(DW, DH) as unknown as { canvas: unknown; ctx: CanvasRenderingContext2D }; L.ctx.setTransform(e.scale, 0, 0, e.scale, 0, 0); paint(new Gfx(L.ctx as unknown as Ctx, e, 0, OIL_M)); e.cache.set(k, L); }
+  // full-frame layers are heavy: keep only the most recently used few. An evicted sprite is simply
+  // painted again when it is next needed, the same pixels, so eviction never changes a frame
+  const lru = (e.cache.get("naina:lru") as string[] | undefined) ?? []; e.cache.set("naina:lru", lru);
+  const at = lru.indexOf(k); if (at >= 0) lru.splice(at, 1); lru.push(k);
+  if (!L) {
+    while (lru.length > SPRITES_KEPT) { const old = lru.shift()!, o = e.cache.get(old) as { canvas: { width: number; height: number } } | undefined; if (o) { o.canvas.width = 1; o.canvas.height = 1; } e.cache.delete(old); }
+    L = e.canvas(DW, DH) as unknown as { canvas: unknown; ctx: CanvasRenderingContext2D }; L.ctx.setTransform(e.scale, 0, 0, e.scale, 0, 0); paint(new Gfx(L.ctx as unknown as Ctx, e, 0, OIL_M)); e.cache.set(k, L);
+  }
   if ((m.alpha ?? 1) <= 0.001) return;
   const c = g.cur, px = m.px ?? CX, py = m.py ?? H / 2; c.save(); c.setTransform(e.scale, 0, 0, e.scale, 0, 0); c.globalAlpha = m.alpha ?? 1;
   c.translate(px + (m.dx ?? 0), py + (m.dy ?? 0)); c.rotate(m.rot ?? 0); c.transform(1, 0, m.skew ?? 0, 1, 0, 0); c.scale(m.sx ?? 1, m.sy ?? 1); c.translate(-px, -py);
