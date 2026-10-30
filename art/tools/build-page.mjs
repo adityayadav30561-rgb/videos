@@ -28,7 +28,7 @@ const tagFilms = {
 };
 const bakeHashes = (metafile, salt) => {
   const inputs = metafile.inputs, fileHash = new Map(), memo = new Map();
-  const h = (p) => { if (!fileHash.has(p)) fileHash.set(p, createHash("sha256").update(readFileSync(resolve(p))).digest("hex")); return fileHash.get(p); };
+  const h = (p) => { if (!fileHash.has(p)) fileHash.set(p, createHash("sha256").update(readFileSync(resolve(p.replace(/^[\w-]+:(?=[\\/]|[A-Za-z]:)/, "")))).digest("hex")); return fileHash.get(p); };
   const closure = (p, seen = new Set()) => { if (seen.has(p) || !inputs[p]) return seen; seen.add(p); for (const i of inputs[p].imports ?? []) closure(i.path, seen); return seen; };
   const out = {};
   for (const p of Object.keys(inputs)) {
