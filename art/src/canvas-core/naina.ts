@@ -1,9 +1,10 @@
 import { Gfx, type Ctx, type Env, type P } from "./core";
 import type { Film } from "./film";
-import { clamp, inside } from "./gallery";
-import { weave } from "./paintedOilKit";
+import { clamp, inside, mix } from "./gallery";
+import { weave, type OStroke } from "./paintedOilKit";
+import { paintedSticker, paintedLine } from "./paintedType";
 import {
-  W, H, CX, OIL_M, LILY_C, GOLD, CRIMSON, TURQ, ROSE, INDIGO, BULLA, NAINA, ramp, rng, st, lay, stage, glossyWord, handLine, sparkle, paintForm,
+  W, H, CX, OIL_M, CARD, LILY_C, GOLD, CRIMSON, TURQ, ROSE, INDIGO, BULLA, NAINA, ramp, rng, st, lay, stage, glossyWord, handLine, sparkle, paintForm,
   contour, objCol, pillowN, sphereN, tangentDir, along, rot, ellipse, thin, edgeDist, woundPoly, paintWound, paintEye, lilyPetals, paintLily,
   lilyDrawing, paintDrop, globeIris, paintStar, heartPt, heartDrawing, PLASTER_AT, PLASTER, type Glossy,
 } from "./nainaFrames";
@@ -38,7 +39,7 @@ import {
 const N = 229; // the song: 19.18 s at 12 fps
 
 // ---------------------------------------------------------------- sprites: a picture painted once, laid down many times
-const SPRITES_KEPT = 8;
+const SPRITES_KEPT = 14;
 type M = { px?: number; py?: number; sx?: number; sy?: number; rot?: number; skew?: number; dx?: number; dy?: number; alpha?: number; clip?: [number, number, number, number]; circle?: [number, number, number] };
 const sprite = (g: Gfx, key: string, paint: (lg: Gfx) => void, m: M = {}) => {
   const e = g.env, DW = Math.round(e.W * e.scale), DH = Math.round(e.H * e.scale), k = `naina:sprite:${key}:${DW}x${DH}`;
@@ -67,8 +68,38 @@ const boil = (f: number, s: number) => { const r = rng(s * 97 + Math.floor(f / 2
 const step = (f: number, f0: number, vals: number[]) => vals[clamp(f - f0, 0, vals.length - 1)];
 
 // ---------------------------------------------------------------- the pictures
-const STAGE = (lg: Gfx) => stage(lg, 1);
-const sticker = (o: Omit<Glossy, "x" | "y" | "size" | "seed">, x: number, y: number, size: number, seed: number, tilt = 0) => (lg: Gfx) => glossyWord(lg, { ...o, x, y, size, seed, tilt });
+// THE CARD, dressed like a wedding card: inside its scalloped edge a plum rule, a row of gold dots and a
+// gold rule; a paisley (keri) in each corner with its dots and a small flower; the mandala filled out
+// with a ring of lotus petals, a ring of dots and a lotus at its heart, all a shade off the card so the
+// pictures stay in front; outside the edge, gold dots stitched round the card on the indigo
+const inset = (k: number): P[] => CARD.map(([x, y]) => [CX + (x - CX) * k, H / 2 + (y - H / 2) * k] as P);
+const pathStrokes = (pts: P[], w: number, col: string, seed: number, o: Partial<OStroke> = {}) => { const out = []; for (let i = 0; i < pts.length; i += 60) out.push(st(pts.slice(i, Math.min(pts.length, i + 64)).filter((_, j) => j % 6 === 0).concat([pts[Math.min(pts.length - 1, i + 63)]]), w, col, seed + i, { impasto: 0.25, dry: 0.12, load: 1.15, jit: 0.03, soft: 0.1, ...o })); return out; };
+const paisley = (cx: number, cy: number, sz: number, a: number): P[] => { const pts: P[] = []; for (let i = 0; i < 60; i++) { const t = (i / 60) * Math.PI * 2, r = sz * (0.55 + 0.45 * Math.cos(t / 2) ** 2), x = Math.cos(t) * r * 0.62, y = Math.sin(t) * r + sz * 0.18 * Math.sin(t) ** 3; pts.push([x, y]); } const tip: P[] = [[-sz * 0.05, -sz * 1.1], [sz * 0.35, -sz * 1.45], [sz * 0.55, -sz * 1.2]]; return [...pts.slice(0, 44), ...tip, ...pts.slice(44)].map(([x, y]) => [cx + x * Math.cos(a) - y * Math.sin(a), cy + x * Math.sin(a) + y * Math.cos(a)] as P); };
+const ORNAMENT = (g: Gfx) => {
+  const PLUM = "#6a1e3c", GOLDP = "#d8a23a", CREAM = "#fbe6c8", MC: P = [CX, H / 2];
+  lay(g, [...pathStrokes([...inset(0.958), inset(0.958)[0]], 4, PLUM, 2000), ...pathStrokes([...inset(0.918), inset(0.918)[0]], 3, GOLDP, 2200)]);
+  const dots = inset(0.938); lay(g, dots.filter((_, i) => i % 13 === 0).map(([x, y], i) => st([[x - 2, y], [x + 2, y + 1]], 8, i % 4 === 0 ? PLUM : GOLDP, 2400 + i, { impasto: 0.6, dry: 0, load: 1.3, soft: 0 })));
+  // the corner paisleys, each pointing in toward the middle, with a ring of dots and a five-petal flower
+  ([[170, 250, 0.7], [W - 170, 250, -0.7 + Math.PI], [170, H - 250, -0.7], [W - 170, H - 250, 0.7 + Math.PI]] as [number, number, number][]).forEach(([x, y, a], i) => {
+    const pz = paisley(x, y, 62, a + Math.PI / 2), inner = paisley(x, y, 34, a + Math.PI / 2);
+    paintForm(g, pz, objCol(["#3a0a20", "#5a1430", "#7e2444", "#a23a5a", "#c8607a", "#eaa0b0"], pillowN(pz, 18), 1.1), 9, along(a), 2600 + i * 10, true); contour(g, pz, "#2a0614", 3, 2605 + i * 10);
+    paintForm(g, inner, objCol(["#6a4004", "#a8700e", "#d49c1e", "#efc443", "#fde69a"], pillowN(inner, 10), 1.1), 6, along(a), 2607 + i * 10, true);
+    lay(g, ellipse(x, y, 92, 92, 14).map(([px, py], k) => st([[px - 1.5, py], [px + 1.5, py + 1]], 7, k % 2 ? GOLDP : CREAM, 2620 + i * 20 + k, { impasto: 0.6, dry: 0, load: 1.3, soft: 0 })));
+    const fx = x + Math.cos(a) * 120, fy = y + Math.sin(a) * 120; lay(g, Array.from({ length: 5 }, (_, k) => { const b = (k / 5) * Math.PI * 2; return st([[fx, fy], [fx + Math.cos(b) * 16, fy + Math.sin(b) * 16]], 10, "#c8607a", 2640 + i * 10 + k, { c1: CREAM, impasto: 0.5, dry: 0.2 }); }).concat([st([[fx - 2, fy], [fx + 2, fy]], 8, GOLDP, 2650 + i, { impasto: 0.8, soft: 0 })]));
+  });
+  // the mandala filled out: a ring of sixteen lotus petals, a ring of dots, a lotus at the heart
+  const petalAt = (r0: number, r1: number, a: number, wd: number): P[] => Array.from({ length: 24 }, (_, i) => { const t = (i / 24) * Math.PI * 2, u = 0.5 - 0.5 * Math.cos(t), r = r0 + (r1 - r0) * u, ww = wd * Math.sin(t) * (1 - 0.6 * u); return [MC[0] + Math.cos(a) * r - Math.sin(a) * ww, MC[1] + Math.sin(a) * r + Math.cos(a) * ww] as P; });
+  const shade = (k: number) => (x: number, y: number) => ramp(ROSE, k + 0.05 * (Math.sin(x * 0.05) * 0.5 + Math.cos(y * 0.04) * 0.5));
+  for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2 + 0.1, pp = petalAt(250, 380, a, 46); paintForm(g, pp, shade(0.72), 10, along(a), 2700 + i, true); lay(g, [st(pp.slice(0, 13), 3, ramp(ROSE, 0.55), 2720 + i, { impasto: 0.15, dry: 0.3 })]); }
+  lay(g, ellipse(MC[0], MC[1], 430, 430, 40).map(([x, y], i) => st([[x - 1.5, y], [x + 1.5, y + 1]], 8, i % 2 ? GOLDP : ramp(ROSE, 0.6), 2760 + i, { impasto: 0.5, dry: 0, load: 1.3, soft: 0, alpha: 0.9 })));
+  for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2 + Math.PI / 8, pp = petalAt(30, 140, a, 34); paintForm(g, pp, shade(0.68), 8, along(a), 2820 + i, true); lay(g, [st(pp.slice(0, 13), 2.5, ramp(ROSE, 0.55), 2830 + i, { impasto: 0.15, dry: 0.3 })]); }
+  lay(g, [st(ellipse(MC[0], MC[1], 22, 22, 12).concat([[MC[0] + 22, MC[1]]]), 14, ramp(ROSE, 0.62), 2850, { impasto: 0.3 })]);
+  // gold stitches round the card on the indigo
+  lay(g, inset(1.035).filter((_, i) => i % 9 === 0).filter(([x, y]) => x > 8 && x < W - 8 && y > 8 && y < H - 8).map(([x, y], i) => st([[x - 1.2, y], [x + 1.2, y + 1]], 6, GOLDP, 2900 + i, { impasto: 0.6, dry: 0, load: 1.3, soft: 0 })));
+};
+const STAGE = (lg: Gfx) => { stage(lg, 1); ORNAMENT(lg); };
+// the hook words, painted with the brush (paintedType): the typeface only guides where the strokes go
+const sticker = (o: Omit<Glossy, "x" | "y" | "size" | "seed">, x: number, y: number, size: number, seed: number, tilt = 0) => (lg: Gfx) => paintedSticker(lg, { text: o.text, face: o.face, rim: o.rim, body: o.body, outline: o.outline, x, y, size, seed, tilt });
 const WOUND_C: P = [CX, 1000], WOUND = woundPoly(WOUND_C[0], WOUND_C[1], 820, 70, -0.5);
 const woundLine = (frac = 1): P[] => rot(Array.from({ length: 120 }, (_, i) => { const t = 0.5 + (i / 119 - 0.5) * frac; return [WOUND_C[0] + (t - 0.5) * 820, WOUND_C[1] + Math.sin(t * Math.PI * 2.2) * 820 * 0.07] as P; }), WOUND_C[0], WOUND_C[1], -0.5);
 const PLASTER_POLY = rot([...ellipse(CX - 230, PLASTER_AT[1], 120, 120, 20, Math.PI / 2, Math.PI * 1.5), ...ellipse(CX + 230, PLASTER_AT[1], 120, 120, 20, -Math.PI / 2, Math.PI / 2)], CX, PLASTER_AT[1], -0.3);
@@ -88,12 +119,24 @@ const EYE_W = 900, EYE_HH = (EYE_W / 2) * 0.42;
 const lidPts = (lower: boolean): P[] => Array.from({ length: 120 }, (_, i) => { const t = i / 119, x = GLOBE_C[0] - EYE_W / 2 + EYE_W * t, s = Math.sin(Math.PI * t); return [x, lower ? GLOBE_C[1] + EYE_HH * 0.75 * Math.pow(s, 1.1) : GLOBE_C[1] - EYE_HH * Math.pow(s, 0.8) * (1 + 0.15 * (t - 0.5))] as P; });
 const UPPER = lidPts(false), LOWER = lidPts(true);
 // the world turns only while it sits still: from when its land starts landing until the blink ends
-const spinAt = (f: number) => (f < 98 ? 0 : (f - 98) * 0.12);
+const spinAt = (f: number) => (f < 96 ? 0 : (f - 96) * 0.16); // the world turns the whole time it is a globe on the card, until the blink ends
 const globeEye = (g: Gfx, f: number, open: number) => paintEye(g, GLOBE_C[0], GLOBE_C[1], EYE_W, open, (gg, cx, cy, r) => globeIris(gg, cx, cy, r, 4, spinAt(f)), 500);
 const HEART_C: P = [CX, 1000], HEART_S = 21;
 const heartLine = (frac: number): P[] => Array.from({ length: 120 }, (_, i) => heartPt(Math.PI - Math.PI * 2 * frac * (i / 119), HEART_C[0], HEART_C[1], HEART_S));
 const EYES: [P, P] = [[330, 1000], [750, 1000]], EYES_W = 360;
 const noIris = () => undefined;
+// the heart's halves, each traced from its bottom point up its outer lobe, over the top, into the dip and
+// straight down the crack; and each eye's almond traced in the same order (inner corner, along the lower
+// lid to the outer corner, back along the upper lid), so every point of the half flows to its place
+const resampleN = (pts: P[], n: number): P[] => { const L: number[] = [0]; for (let i = 1; i < pts.length; i++) L.push(L[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1])); const T = L[L.length - 1]; return Array.from({ length: n }, (_, k) => { const d = (k / (n - 1)) * T; let i = 1; while (i < L.length - 1 && L[i] < d) i++; const f = (d - L[i - 1]) / (L[i] - L[i - 1] || 1); return [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * f, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * f] as P; }); };
+const halfHeart = (side: number): P[] => { const outer = Array.from({ length: 60 }, (_, i) => { const t = Math.PI + (i / 59) * Math.PI; const [x, y] = heartPt(t, HEART_C[0], HEART_C[1], HEART_S); return [side ? 2 * HEART_C[0] - x : x, y] as P; }), top = outer[outer.length - 1], bot = outer[0]; return resampleN([...outer, ...Array.from({ length: 10 }, (_, i) => [top[0] + (side ? 3 : -3), top[1] + (bot[1] - top[1]) * (i / 9)] as P)], 96); };
+const almondOf = (side: number): P[] => {
+  const [cx, cy] = EYES[side], w = EYES_W, hh = (w / 2) * 0.42, at = (t: number, upper: boolean): P => { const x = cx - w / 2 + w * t, sn = Math.sin(Math.PI * t); return [x, upper ? cy - hh * Math.pow(sn, 0.8) * (1 + 0.15 * (t - 0.5)) : cy + hh * 0.75 * Math.pow(sn, 1.1)]; };
+  // the inner corner is the one nearest the middle of the card: the left eye's right end, the right eye's left end
+  const ts = Array.from({ length: 31 }, (_, i) => i / 30), outT = side ? ts : ts.map((t) => 1 - t), backT = outT.slice().reverse();
+  return resampleN([...outT.map((t) => at(t, false)), ...backT.map((t) => at(t, true))], 96);
+};
+const HALF = [halfHeart(0), halfHeart(1)], ALMOND = [almondOf(0), almondOf(1)];
 const IRIS_R = (EYES_W / 2) * 0.42 * 0.95;
 const STARS: [P, P] = [[CX - 200, 1020], [CX + 200, 1030]];
 // the curtain from one corner, painted big enough to cover the whole card, laid down smaller as it sweeps back
@@ -123,7 +166,7 @@ const writeWords = (g: Gfx, f: number, words: [number, string][], x: number, y: 
   const shown = words.filter(([f0]) => f >= f0); if (!shown.length) return;
   const full = words.map(([, w]) => w).join(" "), left = x - textW(g, full, size) / 2, now = shown.map(([, w]) => w).join(" "), before = shown.slice(0, -1).map(([, w]) => w).join(" ");
   const frac = Math.min(1, (f - shown[shown.length - 1][0] + 1) / 2), wb = before ? textW(g, before + " ", size) : 0, wn = textW(g, now, size), c = g.cur;
-  c.save(); c.beginPath(); c.rect(left - 30, y - size * 1.2, wb + (wn - wb) * frac + 40, size * 2.4); c.clip(); handLine(g, now, left, y, size, color, { align: "left" }); c.restore();
+  void c; sprite(g, `line:${full}:${x}:${y}`, (lg) => paintedLine(lg, full, left, y, size, color, 1300 + Math.round(x + y), "left"), { clip: [left - 30, y - size * 1.4, left - 30 + wb + (wn - wb) * frac + 40, y + size * 1.4] });
 };
 const word = (g: Gfx, f: number, f0: number, f1: number, text: string, x: number, y: number, size: number, color: string) => { if (f >= f0 && f < f1) writeWords(g, f, [[f0, text]], x, y, size, color); };
 
@@ -172,7 +215,7 @@ const frame = (g: Gfx, f: number) => {
   // 6. the drop swells into a dark disc that eclipses the lily, and becomes the world, its land landing piece by piece
   if (f >= 88 && f <= 95) { const t = (f - 88) / 7, r = DROP_R + (GLOBE_R - DROP_R) * Math.pow(t, 1.4), x = DROP_ON[0] + (GLOBE_C[0] - DROP_ON[0]) * t, y = DROP_ON[1] + (GLOBE_C[1] - DROP_ON[1]) * t; sprite(g, "disc", DISC, { px: GLOBE_C[0], py: GLOBE_C[1], sx: r / GLOBE_R, sy: r / GLOBE_R, dx: x - GLOBE_C[0], dy: y - GLOBE_C[1] }); }
   if (f >= 96 && f <= 111) { const n = f < 98 ? 0 : f < 99 ? 1 : f < 101 ? 2 : f < 103 ? 3 : 4, s = f < 108 ? 1 : step(f, 108, [0.97, 0.94, 0.92, 0.9]), b = boil(f, 9); void b; globeIris(g, GLOBE_C[0], GLOBE_C[1] + (f >= 108 ? 11 * (1 - (s - 0.9) * 10) : 0), GLOBE_R * s, n, spinAt(f)); }
-  if (f >= 97 && f <= 111) { const ws: [number, string][] = [[97, "जग"], [100, "भूले"], [103, "भूले"]]; ws.forEach(([f0, w], i) => { if (f >= f0) { const a = -Math.PI * 0.78 + (Math.PI * 0.56 * i) / 2; handLine(g, w, GLOBE_C[0] + Math.cos(a) * (GLOBE_R + 52), GLOBE_C[1] + Math.sin(a) * (GLOBE_R + 52), 80, "#0b6670", { tilt: a + Math.PI / 2 }); } }); }
+  if (f >= 97 && f <= 111) { const ws: [number, string][] = [[97, "जग"], [100, "भूले"], [103, "भूले"]]; ws.forEach(([f0, w], i) => { if (f >= f0) { const a = -Math.PI * 0.78 + (Math.PI * 0.56 * i) / 2; const wx = GLOBE_C[0] + Math.cos(a) * (GLOBE_R + 52), wy = GLOBE_C[1] + Math.sin(a) * (GLOBE_R + 52); sprite(g, `arc${i}`, (lg) => paintedLine(lg, w, wx, wy, 80, "#0b6670", 1500 + i, "center", a + Math.PI / 2)); } }); }
   // 7. an eye is drawn round the world: the upper lid, the lashes, the lower lid; the white lands; the world is its iris
   if (f >= 104 && f <= 111) {
     const ku = step(f, 104, [0.2, 0.4, 0.6, 0.8, 1]), kl = f < 106 ? 0 : step(f, 106, [0.3, 0.6, 0.85, 1]);
@@ -188,10 +231,20 @@ const frame = (g: Gfx, f: number) => {
   if (f >= 135 && f <= 139) { const b = boil(f, 13); sprite(g, "heart", (lg) => heartDrawing(lg, HEART_C[0], HEART_C[1], HEART_S, 1, 420, 600), { px: HEART_C[0], py: HEART_C[1], dx: b.dx, dy: b.dy, rot: b.rot }); }
   word(g, f, 128, 144, "दिल", 380, 520, 110, "#4a1238"); word(g, f, 130, 144, "छूलें", 640, 520, 110, "#4a1238"); word(g, f, 136, 144, "छूलें", CX, 650, 96, "#4a1238");
   // 9. the heart splits down the middle into two halves that fly apart and flatten into two almond eyes
-  if (f >= 140 && f <= 143) { const k = [0.25, 0.5, 0.8, 1][f - 140]; [-1, 1].forEach((s) => sprite(g, "heart", (lg) => heartDrawing(lg, HEART_C[0], HEART_C[1], HEART_S, 1, 420, 600), { px: HEART_C[0], py: HEART_C[1], dx: s * 200 * k, rot: s * 0.5 * k, sy: 1 - 0.55 * k, clip: s < 0 ? [0, 0, HEART_C[0], H] : [HEART_C[0], 0, W, H] })); }
-  if (f >= 144 && f <= 175) {
-    const open = f < 146 ? [0.4, 0.75][f - 144] : f >= 172 ? [0.6, 0.3, 0.1, 0.02][f - 172] : 1, b = f >= 146 && f < 172 ? boil(f, 15) : { dx: 0, dy: 0, rot: 0 };
-    sprite(g, f >= 146 && f < 172 ? "twoEyes" : "almonds", (lg) => EYES.forEach(([x, y], i) => paintEye(lg, x, y, EYES_W, 1, f >= 146 && f < 172 ? null : noIris, 700 + i * 40)), { px: CX, py: EYES[0][1], sy: open, dx: b.dx, dy: b.dy });
+  // a crack runs down the heart's middle (138-139); the halves part, and each half's outline flows into
+  // an eye's almond while its red turns to the white of the eye (140-144); the whites land (145); the
+  // irises pop in (146) and the eyes are open (147)
+  if (f >= 138 && f <= 139) { const top = heartPt(0, HEART_C[0], HEART_C[1], HEART_S), bot = heartPt(Math.PI, HEART_C[0], HEART_C[1], HEART_S), k = f === 138 ? 0.5 : 1, zig: P[] = Array.from({ length: 9 }, (_, i) => { const t = (i / 8) * k; return [top[0] + (i % 2 ? 9 : -9) * (i > 0 && i < 8 ? 1 : 0), top[1] + (bot[1] - top[1]) * t] as P; }); lay(g, [st(zig, 6, "#2a0206", 1700 + f, { impasto: 0.3, dry: 0.05, load: 1.3 })]); }
+  if (f >= 140 && f <= 144) {
+    const t = [0.2, 0.42, 0.64, 0.84, 1][f - 140], e = t * t * (3 - 2 * t);
+    [0, 1].forEach((side) => { const A = HALF[side], B = ALMOND[side], lift = Math.sin(Math.PI * e) * 40, poly = A.map((p, i) => [p[0] + (B[i][0] - p[0]) * e, p[1] + (B[i][1] - p[1]) * e - lift] as P);
+      const red = objCol(CRIMSON, pillowN(poly, 30), 1.2), col = (x: number, y: number) => mix(red(x, y), "#efe6e2", e);
+      paintForm(g, poly, col, 12, along(0), 1710 + side * 9 + f, true); contour(g, poly, mix("#3a0408", "#1a0806", e), 4.5, 1730 + side + f); });
+  }
+  if (f >= 145 && f <= 175) {
+    const open = f >= 172 ? [0.6, 0.3, 0.1, 0.02][f - 172] : 1, b = f >= 147 && f < 172 ? boil(f, 15) : { dx: 0, dy: 0, rot: 0 };
+    sprite(g, f >= 147 && f < 172 ? "twoEyes" : "almonds", (lg) => EYES.forEach(([x, y], i) => paintEye(lg, x, y, EYES_W, 1, f >= 147 && f < 172 ? null : noIris, 700 + i * 40)), { px: CX, py: EYES[0][1], sy: open, dx: b.dx, dy: b.dy });
+    if (f === 146) EYES.forEach(([x, y], i) => { const r = IRIS_R * 0.7, cy = y + 6, d = ellipse(x, cy, r, r, 24), n = sphereN(x, cy, r); paintForm(g, d, (px, py) => ramp(TURQ, 0.1 + 0.6 * litN(n(px, py))), 5, tangentDir(x, cy), 1760 + i, true); });
     // the irises drop out of the closing eyes and fall away
     if (f >= 172) EYES.forEach(([x, y], i) => { const dy = [20, 120, 300, 560][f - 172], cy = y + 8 + dy, d = ellipse(x, cy, IRIS_R, IRIS_R, 28), n = sphereN(x, cy, IRIS_R); paintForm(g, d, (px, py) => ramp(TURQ, 0.1 + 0.6 * litN(n(px, py))), 6, tangentDir(x, cy), 750 + i + f * 3, true); lay(g, [st(ellipse(x, cy, IRIS_R * 0.42, IRIS_R * 0.42, 14).concat([[x + IRIS_R * 0.42, cy]]), IRIS_R * 0.36, "#080302", 760 + i + f * 3, { impasto: 0.1, dry: 0.05 })]); });
   }
